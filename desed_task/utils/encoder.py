@@ -4,7 +4,7 @@ from dcase_util.data import DecisionEncoder
 
 
 class ManyHotEncoder:
-    """"
+    """ "
         Adapted after DecisionEncoder.find_contiguous_regions method in
         https://github.com/DCASE-REPO/dcase_util/blob/master/dcase_util/data/decisions.py
 
@@ -18,9 +18,7 @@ class ManyHotEncoder:
         n_frames: int, only useful for strong labels. The number of frames of a segment.
     """
 
-    def __init__(
-        self, labels, audio_len, frame_len, frame_hop, net_pooling=1, fs=16000
-    ):
+    def __init__(self, labels, audio_len, frame_len, frame_hop, net_pooling=1, fs=16000):
         if type(labels) in [np.ndarray, np.array]:
             labels = labels.tolist()
         self.labels = labels
@@ -36,7 +34,7 @@ class ManyHotEncoder:
         self.n_frames = int(int((n_frames / self.frame_hop)) / self.net_pooling)
 
     def encode_weak(self, labels):
-        """ Encode a list of weak labels into a numpy array
+        """Encode a list of weak labels into a numpy array
 
         Args:
             labels: list, list of labels to encode (to a vector of 0 and 1)
@@ -85,9 +83,7 @@ class ManyHotEncoder:
             Encoded labels, 1 where the label is present, 0 otherwise
         """
 
-        assert any(
-            [x is not None for x in [self.audio_len, self.frame_len, self.frame_hop]]
-        )
+        assert any([x is not None for x in [self.audio_len, self.frame_len, self.frame_hop]])
 
         samples_len = self.n_frames
         if type(label_df) is str:
@@ -102,9 +98,7 @@ class ManyHotEncoder:
                         i = self.labels.index(row["event_label"])
                         onset = int(self._time_to_frame(row["onset"]))
                         offset = int(np.ceil(self._time_to_frame(row["offset"])))
-                        y[
-                            onset:offset, i
-                        ] = 1  # means offset not included (hypothesis of overlapping frames, so ok)
+                        y[onset:offset, i] = 1  # means offset not included (hypothesis of overlapping frames, so ok)
 
         elif type(label_df) in [
             pd.Series,
@@ -112,9 +106,7 @@ class ManyHotEncoder:
             np.ndarray,
         ]:  # list of list or list of strings
             if type(label_df) is pd.Series:
-                if {"onset", "offset", "event_label"}.issubset(
-                    label_df.index
-                ):  # means only one value
+                if {"onset", "offset", "event_label"}.issubset(label_df.index):  # means only one value
                     if not pd.isna(label_df["event_label"]):
                         i = self.labels.index(label_df["event_label"])
                         onset = int(self._time_to_frame(label_df["onset"]))
@@ -138,11 +130,7 @@ class ManyHotEncoder:
                         y[onset:offset, i] = 1
 
                 else:
-                    raise NotImplementedError(
-                        "cannot encode strong, type mismatch: {}".format(
-                            type(event_label)
-                        )
-                    )
+                    raise NotImplementedError("cannot encode strong, type mismatch: {}".format(type(event_label)))
 
         else:
             raise NotImplementedError(
@@ -153,7 +141,7 @@ class ManyHotEncoder:
         return y
 
     def decode_weak(self, labels):
-        """ Decode the encoded weak labels
+        """Decode the encoded weak labels
         Args:
             labels: numpy.array, the encoded labels to be decoded
 
@@ -169,7 +157,7 @@ class ManyHotEncoder:
         return result_labels
 
     def decode_strong(self, labels):
-        """ Decode the encoded strong labels
+        """Decode the encoded strong labels
         Args:
             labels: numpy.array, the encoded labels to be decoded
         Returns:

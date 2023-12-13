@@ -8,15 +8,20 @@ import pytorch_lightning as pl
 import torch
 from torchaudio.transforms import AmplitudeToDB, MelSpectrogram
 
+from pytorch_lightning.core.saving import save_hparams_to_yaml
 from desed_task.data_augm import mixup
 from desed_task.utils.scaler import TorchScaler
 import numpy as np
 import torchmetrics
 
+from .modes import TRAIN, TEST, EVALUATION
+from . import losses
+
 from .utils import (
     batched_decode_preds,
     log_sedeval_metrics,
 )
+from .augmentations import filter_aug, frame_shift, time_mask, AddNoise, SpecAugment
 from desed_task.evaluation.evaluation_measures import (
     compute_per_intersection_macro_f1,
     compute_psds_from_operating_points,
@@ -26,7 +31,7 @@ from codecarbon import EmissionsTracker
 
 
 class SEDTask4(pl.LightningModule):
-    """ Pytorch lightning module for the SED 2021 baseline
+    """Pytorch lightning module for the SED 2021 baseline
     Args:
         hparams: dict, the dictionary to be used for the current experiment/
         encoder: ManyHotEncoder object, object to encode and decode labels.
@@ -47,6 +52,7 @@ class SEDTask4(pl.LightningModule):
         hparams,
         encoder,
         sed_student,
+        mode,
         opt=None,
         train_data=None,
         valid_data=None,
@@ -54,18 +60,15 @@ class SEDTask4(pl.LightningModule):
         train_sampler=None,
         scheduler=None,
         fast_dev_run=False,
-        evaluation=False,
-        sed_teacher=None
+        sed_teacher=None,
     ):
         super(SEDTask4, self).__init__()
         self.hparams.update(hparams)
 
-        try:
-            log_dir = self.logger.log_dir
-        except Exception as e:
-            log_dir = self.hparams["log_dir"]
-        self.exp_dir = log_dir
-
+        test_or_eval_folder_name = "eval_folder_44k" if mode == EVALUATION else "test_folder_44k"
+        self.test_or_eval_dataset_name: str = os.path.basename(
+            os.path.normpath(self.hparams["data"][test_or_eval_folder_name])
+        )
         self.encoder = encoder
         self.sed_student = sed_student
         if sed_teacher is None:
@@ -79,7 +82,7 @@ class SEDTask4(pl.LightningModule):
         self.train_sampler = train_sampler
         self.scheduler = scheduler
         self.fast_dev_run = fast_dev_run
-        self.evaluation = evaluation
+        self.mode = mode
 
         if self.fast_dev_run:
             self.num_workers = 1
@@ -103,23 +106,45 @@ class SEDTask4(pl.LightningModule):
         for param in self.sed_teacher.parameters():
             param.detach_()
 
-        # instantiating losses
-        self.supervised_loss = torch.nn.BCELoss()
-        if hparams["training"]["self_sup_loss"] == "mse":
-            self.selfsup_loss = torch.nn.MSELoss()
-        elif hparams["training"]["self_sup_loss"] == "bce":
-            self.selfsup_loss = torch.nn.BCELoss()
+        # postprocess
+        self.decode_weak_mode = hparams["training"].get("decode_weak", 0)
+
+        # data augmentation
+        self.frame_shift_rate = hparams["training"].get("frame_shift_rate", 0.0)
+        self.mixup_rate = hparams["training"].get("mixup_rate", 0.5)
+        if hparams["training"].get("add_noise", None) is not None:
+            self.add_noise = AddNoise(**hparams["training"]["add_noise"])
         else:
-            raise NotImplementedError
+            self.add_noise = None
+        self.time_mask_rate = hparams["training"].get("time_mask_rate", 0.0)
+        self.filter_aug = hparams["training"].get("filter_aug", None)
+        if hparams["training"].get("spec_aug", None) is not None:
+            self.spec_aug = SpecAugment(
+                freq_mask_width=hparams["training"]["spec_aug"]["freq_mask_width"],
+                time_mask_width=hparams["training"]["spec_aug"]["time_mask_width"],
+            )
+        else:
+            self.spec_aug = None
+
+        # instantiating classification loss
+        sup_loss_name = hparams["training"]["sup_loss"]
+        sup_loss_config = hparams["training"].get("sup_loss_config", {})
+        self.supervised_loss = getattr(losses, sup_loss_name)(**sup_loss_config)
+        self.loss_weak_w = hparams["training"].get("loss_weak_w", 1)
+
+        # instantiating consistency loss
+        selfsup_loss_name = hparams["training"]["self_sup_loss"]
+        selfsup_loss_config = hparams["training"].get("self_sup_loss_config", {})
+        self.selfsup_loss = getattr(losses, selfsup_loss_name)(**selfsup_loss_config)
 
         # for weak labels we simply compute f1 score
-        self.get_weak_student_f1_seg_macro = torchmetrics.classification.f_beta.F1(
+        self.get_weak_student_f1_seg_macro = torchmetrics.classification.f_beta.F1Score(
             len(self.encoder.labels),
             average="macro",
             compute_on_step=False,
         )
 
-        self.get_weak_teacher_f1_seg_macro = torchmetrics.classification.f_beta.F1(
+        self.get_weak_teacher_f1_seg_macro = torchmetrics.classification.f_beta.F1Score(
             len(self.encoder.labels),
             average="macro",
             compute_on_step=False,
@@ -128,42 +153,47 @@ class SEDTask4(pl.LightningModule):
         self.scaler = self._init_scaler()
         # buffer for event based scores which we compute using sed-eval
 
-        self.val_buffer_student_synth = {
-            k: pd.DataFrame() for k in self.hparams["training"]["val_thresholds"]
-        }
-        self.val_buffer_teacher_synth = {
-            k: pd.DataFrame() for k in self.hparams["training"]["val_thresholds"]
-        }
+        self.val_buffer_student_synth = {k: pd.DataFrame() for k in self.hparams["training"]["val_thresholds"]}
+        self.val_buffer_teacher_synth = {k: pd.DataFrame() for k in self.hparams["training"]["val_thresholds"]}
 
-        self.val_buffer_student_test = {
-            k: pd.DataFrame() for k in self.hparams["training"]["val_thresholds"]
-        }
-        self.val_buffer_teacher_test = {
-            k: pd.DataFrame() for k in self.hparams["training"]["val_thresholds"]
-        }
+        self.val_buffer_student_test = {k: pd.DataFrame() for k in self.hparams["training"]["val_thresholds"]}
+        self.val_buffer_teacher_test = {k: pd.DataFrame() for k in self.hparams["training"]["val_thresholds"]}
 
         test_n_thresholds = self.hparams["training"]["n_test_thresholds"]
-        test_thresholds = np.arange(
-            1 / (test_n_thresholds * 2), 1, 1 / test_n_thresholds
-        )
+        test_thresholds = np.arange(1 / (test_n_thresholds * 2), 1, 1 / test_n_thresholds)
         self.test_psds_buffer_student = {k: pd.DataFrame() for k in test_thresholds}
         self.test_psds_buffer_teacher = {k: pd.DataFrame() for k in test_thresholds}
         self.decoded_student_05_buffer = pd.DataFrame()
         self.decoded_teacher_05_buffer = pd.DataFrame()
-
+        self.pred_score_list = []
 
     def on_train_start(self) -> None:
-
-        os.makedirs(os.path.join(self.exp_dir, "training_codecarbon"), exist_ok=True)
-        self.tracker_train = EmissionsTracker("DCASE Task 4 SED TRAINING",
-                                        output_dir=os.path.join(self.exp_dir,
-                                                                "training_codecarbon"))
+        hparams_save_file_path: str = f"{self.logger.log_dir}/hparams.yaml"
+        save_hparams_to_yaml(hparams_save_file_path, self.hparams)
+        os.makedirs(os.path.join(self.logger.log_dir, "training_codecarbon"), exist_ok=True)
+        self.tracker_train = EmissionsTracker(
+            "DCASE Task 4 SED TRAINING",
+            output_dir=os.path.join(self.logger.log_dir, "training_codecarbon"),
+        )
         self.tracker_train.start()
 
+    def load_state_dict_by_ckpt_path(self, ckpt_path: str):
+        ckpt_abs_path = str(Path(ckpt_path).resolve())
+        self.ckpt_abs_path = ckpt_abs_path
+        self.ckpt_name_without_ext = "".join(os.path.basename(self.ckpt_abs_path).split(".")[:-1])
+        self.log_dir = os.path.dirname(ckpt_abs_path)
 
+        checkpoint = torch.load(ckpt_abs_path)
+
+        if self.mode == TRAIN:
+            print(f"best model: {ckpt_abs_path}")
+        else:
+            print(f"loaded model: {ckpt_abs_path} \n" f"at epoch: {checkpoint['epoch']}")
+
+        self.load_state_dict(checkpoint["state_dict"])
 
     def update_ema(self, alpha, global_step, model, ema_model):
-        """ Update teacher model parameters
+        """Update teacher model parameters
 
         Args:
             alpha: float, the factor to be used between each updated step.
@@ -177,7 +207,7 @@ class SEDTask4(pl.LightningModule):
             ema_params.data.mul_(alpha).add_(params.data, alpha=1 - alpha)
 
     def _init_scaler(self):
-        """ Scaler inizialization
+        """Scaler inizialization
 
         Raises:
             NotImplementedError: in case of not Implemented scaler
@@ -206,11 +236,7 @@ class SEDTask4(pl.LightningModule):
         if self.hparams["scaler"]["savepath"] is not None:
             if os.path.exists(self.hparams["scaler"]["savepath"]):
                 scaler = torch.load(self.hparams["scaler"]["savepath"])
-                print(
-                    "Loaded Scaler from previous checkpoint from {}".format(
-                        self.hparams["scaler"]["savepath"]
-                    )
-                )
+                print("Loaded Scaler from previous checkpoint from {}".format(self.hparams["scaler"]["savepath"]))
                 return scaler
 
         self.train_loader = self.train_dataloader()
@@ -221,15 +247,11 @@ class SEDTask4(pl.LightningModule):
 
         if self.hparams["scaler"]["savepath"] is not None:
             torch.save(scaler, self.hparams["scaler"]["savepath"])
-            print(
-                "Saving Scaler from previous checkpoint at {}".format(
-                    self.hparams["scaler"]["savepath"]
-                )
-            )
+            print("Saving Scaler from previous checkpoint at {}".format(self.hparams["scaler"]["savepath"]))
             return scaler
 
     def take_log(self, mels):
-        """ Apply the log transformation to mel spectrograms.
+        """Apply the log transformation to mel spectrograms.
         Args:
             mels: torch.Tensor, mel spectrograms for which to apply log.
 
@@ -245,7 +267,7 @@ class SEDTask4(pl.LightningModule):
         return model(self.scaler(self.take_log(mel_feats)))
 
     def training_step(self, batch, batch_indx):
-        """ Apply the training for one batch (a step). Used during trainer.fit
+        """Apply the training for one batch (a step). Used during trainer.fit
 
         Args:
             batch: torch.Tensor, batch input tensor
@@ -257,64 +279,67 @@ class SEDTask4(pl.LightningModule):
 
         audio, labels, padded_indxs = batch
         indx_synth, indx_weak, indx_unlabelled = self.hparams["training"]["batch_size"]
-        features = self.mel_spec(audio)
-
-        batch_num = features.shape[0]
+        # frame_shift
+        if self.frame_shift_rate > 0:
+            audio, labels = frame_shift(audio, labels, self.frame_shift_rate)
+        batch_num = audio.shape[0]
         # deriving masks for each dataset
-        strong_mask = torch.zeros(batch_num).to(features).bool()
-        weak_mask = torch.zeros(batch_num).to(features).bool()
+        strong_mask = torch.zeros(batch_num).to(audio).bool()
+        weak_mask = torch.zeros(batch_num).to(audio).bool()
         strong_mask[:indx_synth] = 1
         weak_mask[indx_synth : indx_weak + indx_synth] = 1
 
         # deriving weak labels
         labels_weak = (torch.sum(labels[weak_mask], -1) > 0).float()
 
+        # time masking
+        if self.time_mask_rate > 0:
+            audio[strong_mask], labels[strong_mask] = time_mask(
+                audio[strong_mask], labels[strong_mask], mask_ratios=self.time_mask_rate
+            )
+        # mixup
         mixup_type = self.hparams["training"].get("mixup")
-        if mixup_type is not None and 0.5 > random.random():
-            features[weak_mask], labels_weak = mixup(
-                features[weak_mask], labels_weak, mixup_label_type=mixup_type
+        if mixup_type is not None and self.mixup_rate > random.random():
+            audio[weak_mask], labels_weak = mixup(audio[weak_mask], labels_weak, mixup_label_type=mixup_type)
+            audio[strong_mask], labels[strong_mask] = mixup(
+                audio[strong_mask], labels[strong_mask], mixup_label_type=mixup_type
             )
-            features[strong_mask], labels[strong_mask] = mixup(
-                features[strong_mask], labels[strong_mask], mixup_label_type=mixup_type
-            )
+        # add music
+        if self.add_noise is not None:
+            audio_stud = self.add_noise(audio)
+        else:
+            audio_stud = audio
+        # mel spectrogram
+        features_stud = self.mel_spec(audio_stud)
+        features_tch = self.mel_spec(audio)
 
+        # filter augmentation
+        if self.filter_aug is not None:
+            features_stud, _ = filter_aug(features_stud, **self.hparams["training"]["filter_aug"])
+        # SpecAugment
+        features_stud = self.scaler(self.take_log(features_stud))
+        if self.spec_aug is not None:
+            features_stud = self.spec_aug(features_stud)
         # sed student forward
-        strong_preds_student, weak_preds_student = self.detect(
-            features, self.sed_student
-        )
+        strong_preds_student, weak_preds_student = self.sed_student(features_stud)
 
         # supervised loss on strong labels
-        loss_strong = self.supervised_loss(
-            strong_preds_student[strong_mask], labels[strong_mask]
-        )
+        loss_strong = self.supervised_loss(strong_preds_student[strong_mask], labels[strong_mask])
         # supervised loss on weakly labelled
         loss_weak = self.supervised_loss(weak_preds_student[weak_mask], labels_weak)
         # total supervised loss
-        tot_loss_supervised = loss_strong + loss_weak
+        tot_loss_supervised = loss_strong + self.loss_weak_w * loss_weak
 
         with torch.no_grad():
-            strong_preds_teacher, weak_preds_teacher = self.detect(
-                features, self.sed_teacher
-            )
-            loss_strong_teacher = self.supervised_loss(
-                strong_preds_teacher[strong_mask], labels[strong_mask]
-            )
+            strong_preds_teacher, weak_preds_teacher = self.detect(features_tch, self.sed_teacher)
+            loss_strong_teacher = self.supervised_loss(strong_preds_teacher[strong_mask], labels[strong_mask])
 
-            loss_weak_teacher = self.supervised_loss(
-                weak_preds_teacher[weak_mask], labels_weak
-            )
+            loss_weak_teacher = self.supervised_loss(weak_preds_teacher[weak_mask], labels_weak)
         # we apply consistency between the predictions, use the scheduler for learning rate (to be changed ?)
-        weight = (
-            self.hparams["training"]["const_max"]
-            * self.scheduler["scheduler"]._get_scaling_factor()
-        )
+        weight = self.hparams["training"]["const_max"] * self.scheduler["scheduler"]._get_scaling_factor()
 
-        strong_self_sup_loss = self.selfsup_loss(
-            strong_preds_student, strong_preds_teacher.detach()
-        )
-        weak_self_sup_loss = self.selfsup_loss(
-            weak_preds_student, weak_preds_teacher.detach()
-        )
+        strong_self_sup_loss = self.selfsup_loss(strong_preds_student, strong_preds_teacher.detach())
+        weak_self_sup_loss = self.selfsup_loss(weak_preds_student, weak_preds_teacher.detach())
         tot_self_loss = (strong_self_sup_loss + weak_self_sup_loss) * weight
 
         tot_loss = tot_loss_supervised + tot_self_loss
@@ -326,7 +351,7 @@ class SEDTask4(pl.LightningModule):
         self.log("train/step", self.scheduler["scheduler"].step_num, prog_bar=True)
         self.log("train/student/tot_self_loss", tot_self_loss, prog_bar=True)
         self.log("train/weight", weight)
-        self.log("train/student/tot_supervised", strong_self_sup_loss, prog_bar=True)
+        self.log("train/student/tot_supervised", tot_loss_supervised, prog_bar=True)
         self.log("train/student/weak_self_sup_loss", weak_self_sup_loss)
         self.log("train/student/strong_self_sup_loss", strong_self_sup_loss)
         self.log("train/lr", self.opt.param_groups[-1]["lr"], prog_bar=True)
@@ -343,7 +368,7 @@ class SEDTask4(pl.LightningModule):
         )
 
     def validation_step(self, batch, batch_indx):
-        """ Apply validation to a batch (step). Used during trainer.fit
+        """Apply validation to a batch (step). Used during trainer.fit
 
         Args:
             batch: torch.Tensor, input batch tensor
@@ -353,7 +378,6 @@ class SEDTask4(pl.LightningModule):
 
         audio, labels, padded_indxs, filenames = batch
 
-
         # prediction for student
         mels = self.mel_spec(audio)
         strong_preds_student, weak_preds_student = self.detect(mels, self.sed_student)
@@ -362,24 +386,12 @@ class SEDTask4(pl.LightningModule):
 
         # we derive masks for each dataset based on folders of filenames
         mask_weak = (
-            torch.tensor(
-                [
-                    str(Path(x).parent)
-                    == str(Path(self.hparams["data"]["weak_folder"]))
-                    for x in filenames
-                ]
-            )
+            torch.tensor([str(Path(x).parent) == str(Path(self.hparams["data"]["weak_folder"])) for x in filenames])
             .to(audio)
             .bool()
         )
-        mask_synth = (
-            torch.tensor(
-                [
-                    str(Path(x).parent)
-                    == str(Path(self.hparams["data"]["synth_val_folder"]))
-                    for x in filenames
-                ]
-            )
+        mask_strong = (
+            torch.tensor([str(Path(x).parent) == str(Path(self.hparams["data"]["test_folder"])) for x in filenames])
             .to(audio)
             .bool()
         )
@@ -387,69 +399,57 @@ class SEDTask4(pl.LightningModule):
         if torch.any(mask_weak):
             labels_weak = (torch.sum(labels[mask_weak], -1) >= 1).float()
 
-            loss_weak_student = self.supervised_loss(
-                weak_preds_student[mask_weak], labels_weak
-            )
-            loss_weak_teacher = self.supervised_loss(
-                weak_preds_teacher[mask_weak], labels_weak
-            )
+            loss_weak_student = self.supervised_loss(weak_preds_student[mask_weak], labels_weak)
+            loss_weak_teacher = self.supervised_loss(weak_preds_teacher[mask_weak], labels_weak)
             self.log("val/weak/student/loss_weak", loss_weak_student)
             self.log("val/weak/teacher/loss_weak", loss_weak_teacher)
 
             # accumulate f1 score for weak labels
-            self.get_weak_student_f1_seg_macro(
-                weak_preds_student[mask_weak], labels_weak.long()
-            )
-            self.get_weak_teacher_f1_seg_macro(
-                weak_preds_teacher[mask_weak], labels_weak.long()
-            )
+            self.get_weak_student_f1_seg_macro(weak_preds_student[mask_weak], labels_weak.long())
+            self.get_weak_teacher_f1_seg_macro(weak_preds_teacher[mask_weak], labels_weak.long())
 
-        if torch.any(mask_synth):
-            loss_strong_student = self.supervised_loss(
-                strong_preds_student[mask_synth], labels[mask_synth]
-            )
-            loss_strong_teacher = self.supervised_loss(
-                strong_preds_teacher[mask_synth], labels[mask_synth]
-            )
+        if torch.any(mask_strong):
+            loss_strong_student = self.supervised_loss(strong_preds_student[mask_strong], labels[mask_strong])
+            loss_strong_teacher = self.supervised_loss(strong_preds_teacher[mask_strong], labels[mask_strong])
 
-            self.log("val/synth/student/loss_strong", loss_strong_student)
-            self.log("val/synth/teacher/loss_strong", loss_strong_teacher)
+            self.log("val/strong/student/loss_strong", loss_strong_student)
+            self.log("val/strong/teacher/loss_strong", loss_strong_teacher)
 
-            filenames_synth = [
-                x
-                for x in filenames
-                if Path(x).parent == Path(self.hparams["data"]["synth_val_folder"])
-            ]
+            filenames_test = [x for x in filenames if Path(x).parent == Path(self.hparams["data"]["test_folder"])]
 
             decoded_student_strong = batched_decode_preds(
-                strong_preds_student[mask_synth],
-                filenames_synth,
+                strong_preds_student[mask_strong],
+                weak_preds_student[mask_strong],
+                filenames_test,
                 self.encoder,
+                thresholds=list(self.val_buffer_student_test.keys()),
                 median_filter=self.hparams["training"]["median_window"],
-                thresholds=list(self.val_buffer_student_synth.keys()),
+                decode_weak=self.decode_weak_mode,
             )
 
-            for th in self.val_buffer_student_synth.keys():
-                self.val_buffer_student_synth[th] = self.val_buffer_student_synth[
-                    th
-                ].append(decoded_student_strong[th], ignore_index=True)
+            for th in self.val_buffer_student_test.keys():
+                self.val_buffer_student_test[th] = self.val_buffer_student_test[th].append(
+                    decoded_student_strong[th], ignore_index=True
+                )
 
             decoded_teacher_strong = batched_decode_preds(
-                strong_preds_teacher[mask_synth],
-                filenames_synth,
+                strong_preds_teacher[mask_strong],
+                weak_preds_teacher[mask_strong],
+                filenames_test,
                 self.encoder,
+                thresholds=list(self.val_buffer_teacher_test.keys()),
                 median_filter=self.hparams["training"]["median_window"],
-                thresholds=list(self.val_buffer_teacher_synth.keys()),
+                decode_weak=self.decode_weak_mode,
             )
-            for th in self.val_buffer_teacher_synth.keys():
-                self.val_buffer_teacher_synth[th] = self.val_buffer_teacher_synth[
-                    th
-                ].append(decoded_teacher_strong[th], ignore_index=True)
+            for th in self.val_buffer_teacher_test.keys():
+                self.val_buffer_teacher_test[th] = self.val_buffer_teacher_test[th].append(
+                    decoded_teacher_strong[th], ignore_index=True
+                )
 
         return
 
     def validation_epoch_end(self, outputs):
-        """ Fonction applied at the end of all the validation steps of the epoch.
+        """Fonction applied at the end of all the validation steps of the epoch.
 
         Args:
             outputs: torch.Tensor, the concatenation of everything returned by validation_step.
@@ -461,60 +461,52 @@ class SEDTask4(pl.LightningModule):
         weak_student_f1_macro = self.get_weak_student_f1_seg_macro.compute()
         weak_teacher_f1_macro = self.get_weak_teacher_f1_seg_macro.compute()
 
-        # synth dataset
+        # validation dataset
         intersection_f1_macro_student = compute_per_intersection_macro_f1(
-            self.val_buffer_student_synth,
-            self.hparams["data"]["synth_val_tsv"],
-            self.hparams["data"]["synth_val_dur"],
+            self.val_buffer_student_test,
+            self.hparams["data"]["test_tsv"],
+            self.hparams["data"]["test_dur"],
         )
 
-        synth_student_event_macro = log_sedeval_metrics(
-            self.val_buffer_student_synth[0.5], self.hparams["data"]["synth_val_tsv"],
+        collar_f1_macro_student = log_sedeval_metrics(
+            self.val_buffer_student_test[0.5],
+            self.hparams["data"]["test_tsv"],
         )[0]
 
         intersection_f1_macro_teacher = compute_per_intersection_macro_f1(
-            self.val_buffer_teacher_synth,
-            self.hparams["data"]["synth_val_tsv"],
-            self.hparams["data"]["synth_val_dur"],
+            self.val_buffer_teacher_test,
+            self.hparams["data"]["test_tsv"],
+            self.hparams["data"]["test_dur"],
         )
 
-        synth_teacher_event_macro = log_sedeval_metrics(
-            self.val_buffer_teacher_synth[0.5], self.hparams["data"]["synth_val_tsv"],
+        collar_f1_macro_teacher = log_sedeval_metrics(
+            self.val_buffer_teacher_test[0.5],
+            self.hparams["data"]["test_tsv"],
         )[0]
 
-        obj_metric_synth_type = self.hparams["training"].get("obj_metric_synth_type")
-        if obj_metric_synth_type is None:
-            synth_metric = intersection_f1_macro_student
-        elif obj_metric_synth_type == "event":
-            synth_metric = synth_student_event_macro
-        elif obj_metric_synth_type == "intersection":
-            synth_metric = intersection_f1_macro_student
+        obj_metric_strong_type = self.hparams["training"].get("obj_metric_strong_type")
+        if obj_metric_strong_type is None:
+            strong_metric = intersection_f1_macro_student
+        elif obj_metric_strong_type == "event":
+            strong_metric = collar_f1_macro_student
+        elif obj_metric_strong_type == "intersection":
+            strong_metric = intersection_f1_macro_student
         else:
-            raise NotImplementedError(
-                f"obj_metric_synth_type: {obj_metric_synth_type} not implemented."
-            )
+            raise NotImplementedError(f"obj_metric_strong_type: {obj_metric_strong_type} not implemented.")
 
-        obj_metric = torch.tensor(weak_student_f1_macro.item() + synth_metric)
+        obj_metric = torch.tensor(weak_student_f1_macro.item() + strong_metric)
 
         self.log("val/obj_metric", obj_metric, prog_bar=True)
         self.log("val/weak/student/macro_F1", weak_student_f1_macro)
         self.log("val/weak/teacher/macro_F1", weak_teacher_f1_macro)
-        self.log(
-            "val/synth/student/intersection_f1_macro", intersection_f1_macro_student
-        )
-        self.log(
-            "val/synth/teacher/intersection_f1_macro", intersection_f1_macro_teacher
-        )
-        self.log("val/synth/student/event_f1_macro", synth_student_event_macro)
-        self.log("val/synth/teacher/event_f1_macro", synth_teacher_event_macro)
+        self.log("val/strong/student/intersection_f1_macro", intersection_f1_macro_student)
+        self.log("val/strong/teacher/intersection_f1_macro", intersection_f1_macro_teacher)
+        self.log("val/strong/student/collar_f1_macro", collar_f1_macro_student)
+        self.log("val/strong/teacher/collar_f1_macro", collar_f1_macro_teacher)
 
         # free the buffers
-        self.val_buffer_student_synth = {
-            k: pd.DataFrame() for k in self.hparams["training"]["val_thresholds"]
-        }
-        self.val_buffer_teacher_synth = {
-            k: pd.DataFrame() for k in self.hparams["training"]["val_thresholds"]
-        }
+        self.val_buffer_student_test = {k: pd.DataFrame() for k in self.hparams["training"]["val_thresholds"]}
+        self.val_buffer_teacher_test = {k: pd.DataFrame() for k in self.hparams["training"]["val_thresholds"]}
 
         self.get_weak_student_f1_seg_macro.reset()
         self.get_weak_teacher_f1_seg_macro.reset()
@@ -527,23 +519,33 @@ class SEDTask4(pl.LightningModule):
         return checkpoint
 
     def test_step(self, batch, batch_indx):
-        """ Apply Test to a batch (step), used only when (trainer.test is called)
+        """Apply Test to a batch (step), used only when (trainer.test is called)
 
         Args:
             batch: torch.Tensor, input batch tensor
             batch_indx: torch.Tensor, 1D tensor of indexes to know which data are present in each batch.
         Returns:
         """
-        
-        audio, labels, padded_indxs, filenames = batch        
-        
+
+        audio, labels, padded_indxs, filenames = batch
+
         # prediction for student
         mels = self.mel_spec(audio)
         strong_preds_student, weak_preds_student = self.detect(mels, self.sed_student)
         # prediction for teacher
         strong_preds_teacher, weak_preds_teacher = self.detect(mels, self.sed_teacher)
-        
-        if not self.evaluation:
+
+        sps_np = strong_preds_student.detach().cpu().numpy()
+        wps_np = weak_preds_student.detach().cpu().numpy()
+        spt_np = strong_preds_teacher.detach().cpu().numpy()
+        wpt_np = weak_preds_teacher.detach().cpu().numpy()
+
+        for filename, sps, wps, spt, wpt in zip(filenames, sps_np, wps_np, spt_np, wpt_np):
+            self.pred_score_list.append(
+                {"filename": filename, "student": sps, "student_weak": wps, "teacher": spt, "teacher_weak": wpt}
+            )
+
+        if self.mode != EVALUATION:
             loss_strong_student = self.supervised_loss(strong_preds_student, labels)
             loss_strong_teacher = self.supervised_loss(strong_preds_teacher, labels)
 
@@ -553,68 +555,71 @@ class SEDTask4(pl.LightningModule):
         # compute psds
         decoded_student_strong = batched_decode_preds(
             strong_preds_student,
+            weak_preds_student,
             filenames,
             self.encoder,
-            median_filter=self.hparams["training"]["median_window"],
             thresholds=list(self.test_psds_buffer_student.keys()),
+            median_filter=self.hparams["training"]["median_window"],
+            decode_weak=self.decode_weak_mode,
         )
 
         for th in self.test_psds_buffer_student.keys():
-            self.test_psds_buffer_student[th] = self.test_psds_buffer_student[
-                th
-            ].append(decoded_student_strong[th], ignore_index=True)
+            self.test_psds_buffer_student[th] = self.test_psds_buffer_student[th].append(
+                decoded_student_strong[th], ignore_index=True
+            )
 
         decoded_teacher_strong = batched_decode_preds(
             strong_preds_teacher,
+            weak_preds_teacher,
             filenames,
             self.encoder,
-            median_filter=self.hparams["training"]["median_window"],
             thresholds=list(self.test_psds_buffer_teacher.keys()),
+            median_filter=self.hparams["training"]["median_window"],
+            decode_weak=self.decode_weak_mode,
         )
 
         for th in self.test_psds_buffer_teacher.keys():
-            self.test_psds_buffer_teacher[th] = self.test_psds_buffer_teacher[
-                th
-            ].append(decoded_teacher_strong[th], ignore_index=True)
+            self.test_psds_buffer_teacher[th] = self.test_psds_buffer_teacher[th].append(
+                decoded_teacher_strong[th], ignore_index=True
+            )
 
-        
         # compute f1 score
         decoded_student_strong = batched_decode_preds(
             strong_preds_student,
+            weak_preds_student,
             filenames,
             self.encoder,
-            median_filter=self.hparams["training"]["median_window"],
             thresholds=[0.5],
+            median_filter=self.hparams["training"]["median_window"],
+            decode_weak=self.decode_weak_mode,
         )
 
-        self.decoded_student_05_buffer = self.decoded_student_05_buffer.append(
-            decoded_student_strong[0.5]
-        )
+        self.decoded_student_05_buffer = self.decoded_student_05_buffer.append(decoded_student_strong[0.5])
 
         decoded_teacher_strong = batched_decode_preds(
             strong_preds_teacher,
+            weak_preds_teacher,
             filenames,
             self.encoder,
-            median_filter=self.hparams["training"]["median_window"],
             thresholds=[0.5],
+            median_filter=self.hparams["training"]["median_window"],
+            decode_weak=self.decode_weak_mode,
         )
 
-        self.decoded_teacher_05_buffer = self.decoded_teacher_05_buffer.append(
-            decoded_teacher_strong[0.5]
-        )
+        self.decoded_teacher_05_buffer = self.decoded_teacher_05_buffer.append(decoded_teacher_strong[0.5])
 
     def on_test_epoch_end(self):
-        # pub eval dataset
-        save_dir = os.path.join(self.exp_dir, "metrics_test")
-        
-        if self.evaluation:
+        if self.mode == EVALUATION:
+            metrics_dir_basename: str = f"metrics_eval_{self.test_or_eval_dataset_name}_{self.ckpt_name_without_ext}"
+            save_dir: str = os.path.join(self.log_dir, metrics_dir_basename)
+
             # only save the predictions
             save_dir_student = os.path.join(save_dir, "student")
             os.makedirs(save_dir_student, exist_ok=True)
             self.decoded_student_05_buffer.to_csv(
                 os.path.join(save_dir_student, f"predictions_05_student.tsv"),
                 sep="\t",
-                index=False
+                index=False,
             )
 
             for k in self.test_psds_buffer_student.keys():
@@ -624,14 +629,14 @@ class SEDTask4(pl.LightningModule):
                     index=False,
                 )
             print(f"\nPredictions for student saved in: {save_dir_student}")
-            
+
             save_dir_teacher = os.path.join(save_dir, "teacher")
             os.makedirs(save_dir_teacher, exist_ok=True)
-           
+
             self.decoded_teacher_05_buffer.to_csv(
                 os.path.join(save_dir_teacher, f"predictions_05_teacher.tsv"),
                 sep="\t",
-                index=False
+                index=False,
             )
 
             for k in self.test_psds_buffer_student.keys():
@@ -642,7 +647,12 @@ class SEDTask4(pl.LightningModule):
                 )
             print(f"\nPredictions for teacher saved in: {save_dir_teacher}")
 
+            results = {}
+
         else:
+            metrics_dir_basename: str = f"metrics_test_{self.test_or_eval_dataset_name}_{self.ckpt_name_without_ext}"
+            save_dir: str = os.path.join(self.log_dir, metrics_dir_basename)
+
             # calculate the metrics
             psds_score_scenario1 = compute_psds_from_operating_points(
                 self.test_psds_buffer_student,
@@ -730,25 +740,41 @@ class SEDTask4(pl.LightningModule):
                 "test/teacher/intersection_f1_macro": intersection_f1_macro_teacher,
             }
 
-            if self.evaluation:
-                self.tracker_eval.stop()
-                eval_kwh = self.tracker_eval._total_energy.kwh
-                results.update({"/eval/tot_energy_kWh": torch.tensor(float(eval_kwh))})
-                with open(os.path.join(self.exp_dir, "evaluation_codecarbon", "eval_tot_kwh.txt"), "w") as f:
-                    f.write(str(eval_kwh))
-            else:
-                self.tracker_devtest.stop()
-                eval_kwh = self.tracker_devtest._total_energy.kwh
-                results.update({"/test/tot_energy_kWh": torch.tensor(float(eval_kwh))})
-                with open(os.path.join(self.exp_dir, "devtest_codecarbon", "devtest_tot_kwh.txt"), "w") as f:
-                    f.write(str(eval_kwh))
+        if self.mode == EVALUATION:
+            self.tracker_eval.stop()
+            eval_kwh = self.tracker_eval._total_energy.kwh
+            results.update({"/eval/tot_energy_kWh": torch.tensor(float(eval_kwh))})
+            codecarbon_dir_basename = (
+                f"evaluation_codecarbon_{self.test_or_eval_dataset_name}_{self.ckpt_name_without_ext}"
+            )
+            with open(
+                os.path.join(self.log_dir, codecarbon_dir_basename, "eval_tot_kwh.txt"),
+                "w",
+            ) as f:
+                f.write(str(eval_kwh))
+        else:
+            self.tracker_devtest.stop()
+            eval_kwh = self.tracker_devtest._total_energy.kwh
+            results.update({"/test/tot_energy_kWh": torch.tensor(float(eval_kwh))})
+            codecarbon_dir_basename = (
+                f"devtest_codecarbon_{self.test_or_eval_dataset_name}_{self.ckpt_name_without_ext}"
+            )
+            with open(
+                os.path.join(self.log_dir, codecarbon_dir_basename, "devtest_tot_kwh.txt"),
+                "w",
+            ) as f:
+                f.write(str(eval_kwh))
 
-            if self.logger is not None:
-                self.logger.log_metrics(results)
-                self.logger.log_hyperparams(self.hparams, results)
+        if self.logger is not None:
+            self.logger.log_metrics(results)
+            self.logger.log_hyperparams(self.hparams, results)
 
+        with open(f"{save_dir}/result.txt", "w") as f:
             for key in results.keys():
                 self.log(key, results[key], prog_bar=True, logger=False)
+                f.write(f"{key}: {results[key]}\n")
+
+        np.save(f"{save_dir}/scores.npy", self.pred_score_list)
 
     def configure_optimizers(self):
         return [self.opt], [self.scheduler]
@@ -788,22 +814,30 @@ class SEDTask4(pl.LightningModule):
         self.tracker_train.stop()
         training_kwh = self.tracker_train._total_energy.kwh
         self.logger.log_metrics({"/train/tot_energy_kWh": torch.tensor(float(training_kwh))})
-        with open(os.path.join(self.exp_dir, "training_codecarbon", "training_tot_kwh.txt"), "w") as f:
+        with open(
+            os.path.join(self.logger.log_dir, "training_codecarbon", "training_tot_kwh.txt"),
+            "w",
+        ) as f:
             f.write(str(training_kwh))
 
     def on_test_start(self) -> None:
-
-        if self.evaluation:
-            os.makedirs(os.path.join(self.exp_dir, "evaluation_codecarbon"), exist_ok=True)
-            self.tracker_eval = EmissionsTracker("DCASE Task 4 SED EVALUATION",
-                                                 output_dir=os.path.join(self.exp_dir,
-                                                                         "evaluation_codecarbon"))
+        if self.mode == EVALUATION:
+            codecarbon_dir_basename = (
+                f"evaluation_codecarbon_{self.test_or_eval_dataset_name}_{self.ckpt_name_without_ext}"
+            )
+            os.makedirs(os.path.join(self.log_dir, codecarbon_dir_basename), exist_ok=True)
+            self.tracker_eval = EmissionsTracker(
+                "DCASE Task 4 SED EVALUATION",
+                output_dir=os.path.join(self.log_dir, codecarbon_dir_basename),
+            )
             self.tracker_eval.start()
         else:
-            os.makedirs(os.path.join(self.exp_dir, "devtest_codecarbon"), exist_ok=True)
-            self.tracker_devtest = EmissionsTracker("DCASE Task 4 SED DEVTEST",
-                                                 output_dir=os.path.join(self.exp_dir,
-                                                                         "devtest_codecarbon"))
+            codecarbon_dir_basename = (
+                f"devtest_codecarbon_{self.test_or_eval_dataset_name}_{self.ckpt_name_without_ext}"
+            )
+            os.makedirs(os.path.join(self.log_dir, codecarbon_dir_basename), exist_ok=True)
+            self.tracker_devtest = EmissionsTracker(
+                "DCASE Task 4 SED DEVTEST",
+                output_dir=os.path.join(self.log_dir, codecarbon_dir_basename),
+            )
             self.tracker_devtest.start()
-
-

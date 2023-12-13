@@ -2,11 +2,14 @@ import argparse
 import glob
 import os
 from pathlib import Path
+import multiprocessing as mp
+from itertools import repeat
 
 import librosa
+import soundfile as sf
 import torch
 import torchaudio
-import tqdm
+from tqdm import tqdm
 
 parser = argparse.ArgumentParser("Resample a folder recursively")
 parser.add_argument(
@@ -42,7 +45,20 @@ def resample(audio, orig_fs, target_fs):
     return out
 
 
-def resample_folder(in_dir, out_dir, target_fs=16000, regex="*.wav"):
+def audio_prep(x):
+    f, target_fs, in_dir, out_dir = x
+    try:
+        audio, _ = librosa.load(f, sr=target_fs, mono=True, duration=10)
+        os.makedirs(
+            Path(os.path.join(out_dir, Path(f).relative_to(Path(in_dir)))).parent,
+            exist_ok=True,
+        )
+        sf.write(os.path.join(out_dir, Path(f).relative_to(Path(in_dir))), audio, target_fs)
+    except Exception as e:
+        print(f"Error loading {f} for {e}")
+
+
+def resample_folder(in_dir, out_dir, target_fs=16000, regex="*.wav", use_mp=False):
     """
     Resamples the audio files contained in the in_dir folder and saves them in out_dir folder
 
@@ -59,20 +75,14 @@ def resample_folder(in_dir, out_dir, target_fs=16000, regex="*.wav"):
         if len(files) == len(out_files):
             compute = False
 
-    if compute:
-        for f in tqdm.tqdm(files):
-            audio, orig_fs = torchaudio.load(f)
-            audio = resample(audio, orig_fs, target_fs)
-
-            os.makedirs(
-                Path(os.path.join(out_dir, Path(f).relative_to(Path(in_dir)))).parent,
-                exist_ok=True,
-            )
-            torchaudio.save(
-                os.path.join(out_dir, Path(f).relative_to(Path(in_dir))),
-                audio,
-                target_fs,
-            )
+    if compute and use_mp:
+        with mp.Pool(mp.cpu_count() // 2) as p, tqdm(total=len(files), desc=f"{in_dir[:30]}...") as pbar:
+            for _ in tqdm(p.imap_unordered(audio_prep, zip(files, repeat(target_fs), repeat(in_dir), repeat(out_dir)))):
+                pbar.update()
+    elif compute and not use_mp:
+        with tqdm(total=len(files), desc="") as pbar:
+            for _ in tqdm(map(audio_prep, zip(files, repeat(target_fs), repeat(in_dir), repeat(out_dir)))):
+                pbar.update()
     return compute
 
 

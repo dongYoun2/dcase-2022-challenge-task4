@@ -17,8 +17,8 @@ def create_folder(folder, exist_ok=True, delete_if_exists=False):
 
     Args:
         folder (str): path of folder to create.
-        exist_ok (bool): if set to True (default), the FileExistsError is not raised. 
-        delete_if_exists: bool, True if you want to delete the folder if already exists. 
+        exist_ok (bool): if set to True (default), the FileExistsError is not raised.
+        delete_if_exists: bool, True if you want to delete the folder if already exists.
     Returns:
         None
     """
@@ -107,9 +107,7 @@ def jam_annotation(annotations, background_path, foreground_path):
 
     sandbox = get_sandbox(annotations, background_path, foreground_path)
 
-    ann = jams.Annotation(
-        namespace=namespace, sandbox=sandbox, time=time, duration=duration
-    )
+    ann = jams.Annotation(namespace=namespace, sandbox=sandbox, time=time, duration=duration)
 
     return ann
 
@@ -170,7 +168,7 @@ def change_snr(annotations, ann_snr, db_to_decrease, target_labels):
         ann_snr (Annotations): annotations of the jam file with the new SNR
         db_to_decrease (int): db to decrease for no-target events
         target_labels (list): list of target labels to consider
-    
+
     Returns:
         None
     """
@@ -211,7 +209,7 @@ def collect_target_events(annotations, ann_target, target_labels):
         annotations (dict): annotations from jam file
         ann_target (dict): only target events annotations
         target_labels (list): list of target events
-        
+
 
     Returns:
         int: number of target events present in the jam file
@@ -346,15 +344,11 @@ class Subset:
             out_file_path (str): output file path
         """
 
-        jam, ann = get_jam_annotations(
-            annotations, self.background_folder, self.foreground_folder
-        )
+        jam, ann = get_jam_annotations(annotations, self.background_folder, self.foreground_folder)
 
         if self.only_target:
             collect_target_events(annotations, ann, target_labels)
-            generate_audio(
-                jam, ann, self.background_folder, self.foreground_folder, out_file_path
-            )
+            generate_audio(jam, ann, self.background_folder, self.foreground_folder, out_file_path)
         else:
             if collect_nontarget_events(annotations, ann, target_labels) > 1:
                 generate_audio(
@@ -377,16 +371,12 @@ class Subset:
             None
         """
 
-        jam, ann = get_jam_annotations(
-            annotations, self.background_folder, self.foreground_folder
-        )
+        jam, ann = get_jam_annotations(annotations, self.background_folder, self.foreground_folder)
 
         change_snr(annotations, ann, db_to_decrease, self.target_labels)
 
         # generate audio
-        generate_audio(
-            jam, ann, self.background_folder, self.foreground_folder, out_file_path
-        )
+        generate_audio(jam, ann, self.background_folder, self.foreground_folder, out_file_path)
 
     def decrease_snr(
         self,
@@ -428,8 +418,8 @@ if __name__ == "__main__":
         "--all",
         action="store_true",
         default=False,
-        help="""Generation of the target versions of ths train, validation and evaluation dataset, 
-        non-target events version of the evaluation set and SNR versions of the train, 
+        help="""Generation of the target versions of ths train, validation and evaluation dataset,
+        non-target events version of the evaluation set and SNR versions of the train,
         validation subset of the DESED dataset.""",
     )
 
@@ -437,8 +427,8 @@ if __name__ == "__main__":
         "--tg",
         action="store_true",
         default=False,
-        help="""Generation of the target versions of ths train, validation and/or evaluation dataset. 
-        If only one dataset need to be generated, this should be set on the configuration file. 
+        help="""Generation of the target versions of ths train, validation and/or evaluation dataset.
+        If only one dataset need to be generated, this should be set on the configuration file.
         """,
     )
 
@@ -446,8 +436,8 @@ if __name__ == "__main__":
         "--ntg",
         action="store_true",
         default=False,
-        help="""Generation of the non-target versions of the train, validation and/or evaluation dataset. 
-        If only one dataset need to be generated, this should be set on the configuration file. 
+        help="""Generation of the non-target versions of the train, validation and/or evaluation dataset.
+        If only one dataset need to be generated, this should be set on the configuration file.
         """,
     )
 
@@ -455,9 +445,9 @@ if __name__ == "__main__":
         "--snr",
         action="store_true",
         default=False,
-        help="""Generation of the different SNR versions of the dataset. 
-        If only one dataset need to be generated, this should be set on the configuration file. 
-        dB to decreased can be set on the configuration file. 
+        help="""Generation of the different SNR versions of the dataset.
+        If only one dataset need to be generated, this should be set on the configuration file.
+        dB to decreased can be set on the configuration file.
         """,
     )
 

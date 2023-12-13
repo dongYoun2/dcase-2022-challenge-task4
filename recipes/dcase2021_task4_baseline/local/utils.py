@@ -12,9 +12,14 @@ import glob
 
 
 def batched_decode_preds(
-    strong_preds, filenames, encoder, thresholds=[0.5], median_filter=7, pad_indx=None,
+    strong_preds,
+    filenames,
+    encoder,
+    thresholds=[0.5],
+    median_filter=7,
+    pad_indx=None,
 ):
-    """ Decode a batch of predictions to dataframes. Each threshold gives a different dataframe and stored in a
+    """Decode a batch of predictions to dataframes. Each threshold gives a different dataframe and stored in a
     dictionary
 
     Args:
@@ -51,7 +56,7 @@ def batched_decode_preds(
 
 
 def convert_to_event_based(weak_dataframe):
-    """ Convert a weakly labeled DataFrame ('filename', 'event_labels') to a DataFrame strongly labeled
+    """Convert a weakly labeled DataFrame ('filename', 'event_labels') to a DataFrame strongly labeled
     ('filename', 'onset', 'offset', 'event_label').
 
     Args:
@@ -66,14 +71,12 @@ def convert_to_event_based(weak_dataframe):
 
         events = r["event_labels"].split(",")
         for e in events:
-            new.append(
-                {"filename": r["filename"], "event_label": e, "onset": 0, "offset": 1}
-            )
+            new.append({"filename": r["filename"], "event_label": e, "onset": 0, "offset": 1})
     return pd.DataFrame(new)
 
 
 def log_sedeval_metrics(predictions, ground_truth, save_dir=None):
-    """ Return the set of metrics from sed_eval
+    """Return the set of metrics from sed_eval
     Args:
         predictions: pd.DataFrame, the dataframe of predictions.
         ground_truth: pd.DataFrame, the dataframe of groundtruth.
@@ -123,11 +126,7 @@ def parse_jams(jams_list, encoder, out_json):
         )
 
         for indx, sound in enumerate(jdata["annotations"][0]["data"]):
-            source_name = Path(
-                jdata["annotations"][-1]["sandbox"]["scaper"][
-                    "isolated_events_audio_path"
-                ][indx]
-            ).stem
+            source_name = Path(jdata["annotations"][-1]["sandbox"]["scaper"]["isolated_events_audio_path"][indx]).stem
             source_file = os.path.join(
                 Path(jamfile).parent,
                 Path(jamfile).stem + "_events",
@@ -137,9 +136,7 @@ def parse_jams(jams_list, encoder, out_json):
             if sound["value"]["role"] == "background":
                 backgrounds.append(source_file)
             else:  # it is an event
-                if (
-                    sound["value"]["label"] not in encoder.labels
-                ):  # correct different labels
+                if sound["value"]["label"] not in encoder.labels:  # correct different labels
                     if sound["value"]["label"].startswith("Frying"):
                         sound["value"]["label"] = "Frying"
                     elif sound["value"]["label"].startswith("Vacuum_cleaner"):
@@ -151,8 +148,7 @@ def parse_jams(jams_list, encoder, out_json):
                     {
                         "filename": source_file,
                         "onset": sound["value"]["event_time"],
-                        "offset": sound["value"]["event_time"]
-                        + sound["value"]["event_duration"],
+                        "offset": sound["value"]["event_time"] + sound["value"]["event_duration"],
                         "event_label": sound["value"]["label"],
                     }
                 )
@@ -165,11 +161,11 @@ def parse_jams(jams_list, encoder, out_json):
 def generate_tsv_wav_durations(audio_dir, out_tsv):
     """
         Generate a dataframe with filename and duration of the file
-    
+
     Args:
         audio_dir: str, the path of the folder where audio files are (used by glob.glob)
         out_tsv: str, the path of the output tsv file
-    
+
     Returns:
         pd.DataFrame: the dataframe containing filenames and durations
     """

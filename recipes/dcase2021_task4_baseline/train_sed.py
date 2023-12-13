@@ -38,16 +38,13 @@ def resample_data_generate_durations(config_data, test_only=False, evaluation=Fa
         dsets = ["eval_folder"]
 
     for dset in dsets:
-        computed = resample_folder(
-            config_data[dset + "_44k"], config_data[dset], target_fs=config_data["fs"]
-        )
+        computed = resample_folder(config_data[dset + "_44k"], config_data[dset], target_fs=config_data["fs"])
 
     if not evaluation:
         for base_set in ["synth_val", "test"]:
             if not os.path.exists(config_data[base_set + "_dur"]) or computed:
-                generate_tsv_wav_durations(
-                    config_data[base_set + "_folder"], config_data[base_set + "_dur"]
-                )
+                generate_tsv_wav_durations(config_data[base_set + "_folder"], config_data[base_set + "_dur"])
+
 
 def single_run(
     config,
@@ -56,7 +53,7 @@ def single_run(
     checkpoint_resume=None,
     test_state_dict=None,
     fast_dev_run=False,
-    evaluation=False
+    evaluation=False,
 ):
     """
     Running sound event detection baselin
@@ -90,15 +87,10 @@ def single_run(
             devtest_df,
             encoder,
             return_filename=True,
-            pad_to=config["data"]["audio_max_len"]
+            pad_to=config["data"]["audio_max_len"],
         )
     else:
-        devtest_dataset = UnlabeledSet(
-            config["data"]["eval_folder"],
-            encoder,
-            pad_to=None,
-            return_filename=True
-        )
+        devtest_dataset = UnlabeledSet(config["data"]["eval_folder"], encoder, pad_to=None, return_filename=True)
 
     test_dataset = devtest_dataset
 
@@ -165,10 +157,7 @@ def single_run(
         epoch_len = min(
             [
                 len(tot_train_data[indx])
-                // (
-                    config["training"]["batch_size"][indx]
-                    * config["training"]["accumulate_batches"]
-                )
+                // (config["training"]["batch_size"][indx] * config["training"]["accumulate_batches"])
                 for indx in range(len(tot_train_data))
             ]
         )
@@ -180,7 +169,8 @@ def single_run(
             "interval": "step",
         }
         logger = TensorBoardLogger(
-            os.path.dirname(config["log_dir"]), config["log_dir"].split("/")[-1],
+            os.path.dirname(config["log_dir"]),
+            config["log_dir"].split("/")[-1],
         )
         print(f"experiment dir: {logger.log_dir}")
 
@@ -219,7 +209,7 @@ def single_run(
         train_sampler=batch_sampler,
         scheduler=exp_scheduler,
         fast_dev_run=fast_dev_run,
-        evaluation=evaluation
+        evaluation=evaluation,
     )
 
     # Not using the fast_dev_run of Trainer because creates a DummyLogger so cannot check problems with the Logger
@@ -283,14 +273,11 @@ if __name__ == "__main__":
         default=None,
         help="Allow the training to be resumed, take as input a previously saved model (.ckpt).",
     )
-    parser.add_argument(
-        "--test_from_checkpoint", default=None, help="Test the model specified"
-    )
+    parser.add_argument("--test_from_checkpoint", default=None, help="Test the model specified")
     parser.add_argument(
         "--gpus",
         default="0",
-        help="The number of GPUs to train on, or the gpu to use, default='0', "
-        "so uses one GPU indexed by 0.",
+        help="The number of GPUs to train on, or the gpu to use, default='0', " "so uses one GPU indexed by 0.",
     )
     parser.add_argument(
         "--fast_dev_run",
@@ -300,38 +287,31 @@ if __name__ == "__main__":
         "It uses very few batches and epochs so it won't give any meaningful result.",
     )
 
-    parser.add_argument(
-        "--eval_from_checkpoint",
-        default=None,
-        help="Evaluate the model specified"
-    )
+    parser.add_argument("--eval_from_checkpoint", default=None, help="Evaluate the model specified")
 
     args = parser.parse_args()
 
     with open(args.conf_file, "r") as f:
         configs = yaml.safe_load(f)
 
-    evaluation = False 
+    evaluation = False
     test_from_checkpoint = args.test_from_checkpoint
 
     if args.eval_from_checkpoint is not None:
         test_from_checkpoint = args.eval_from_checkpoint
         evaluation = True
-    
+
     test_model_state_dict = None
     if test_from_checkpoint is not None:
         checkpoint = torch.load(test_from_checkpoint)
         configs_ckpt = checkpoint["hyper_parameters"]
         configs_ckpt["data"] = configs["data"]
-        print(
-            f"loaded model: {test_from_checkpoint} \n"
-            f"at epoch: {checkpoint['epoch']}"
-        )
+        print(f"loaded model: {test_from_checkpoint} \n" f"at epoch: {checkpoint['epoch']}")
         test_model_state_dict = checkpoint["state_dict"]
 
     if evaluation:
         configs["training"]["batch_size_val"] = 1
-        
+
     seed = configs["training"]["seed"]
     if seed:
         torch.random.manual_seed(seed)
@@ -348,5 +328,5 @@ if __name__ == "__main__":
         args.resume_from_checkpoint,
         test_model_state_dict,
         args.fast_dev_run,
-        evaluation
+        evaluation,
     )

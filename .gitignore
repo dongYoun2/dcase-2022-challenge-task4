@@ -3,8 +3,11 @@ oar_job_*
 OAR*
 recipes/dcase2020_task4_baseline/logs/*
 recipes/dcase2020_task4_baseline/logs*
+recipes/dcase2022_task4_baseline/exp*
+recipes/dcase2022_task4_baseline/lightning_logs
 
 #ignore data folders
+data/
 recipes/dcase2020_task4_baseline/data
 recipes/dcase2020_task4_baseline/exp_out/Mean*
 # to remove this line
@@ -154,3 +157,7 @@ dmypy.json
 
 # Pycharm
 .idea
+
+submission*/
+test*/
+public_eval*/

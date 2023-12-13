@@ -1,0 +1,3 @@
+TRAIN = 0
+TEST = 1
+EVALUATION = 2

@@ -1,8 +1,11 @@
 import os
 from pathlib import Path
+from typing import Optional, Union, List
 
 import pandas as pd
 import scipy
+import torch
+import numpy as np
 
 from desed_task.evaluation.evaluation_measures import compute_sed_eval_metrics
 import json
@@ -12,46 +15,71 @@ import glob
 
 
 def batched_decode_preds(
-    strong_preds, filenames, encoder, thresholds=[0.5], median_filter=7, pad_indx=None,
+    strong_preds_batch,
+    weak_preds_batch,
+    filenames,
+    encoder,
+    thresholds=[0.5],
+    median_filter: Union[List[int], int] = 7,
+    decode_weak: Optional[int] = None,
+    pad_indicies=None,
 ):
-    """ Decode a batch of predictions to dataframes. Each threshold gives a different dataframe and stored in a
+    """Decode a batch of predictions to dataframes. Each threshold gives a different dataframe and stored in a
     dictionary
-
     Args:
-        strong_preds: torch.Tensor, batch of strong predictions.
+        strong_preds_batch: torch.Tensor, batch of strong predictions.
         filenames: list, the list of filenames of the current batch.
         encoder: ManyHotEncoder object, object used to decode predictions.
         thresholds: list, the list of thresholds to be used for predictions.
-        median_filter: int, the number of frames for which to apply median window (smoothing).
-        pad_indx: list, the list of indexes which have been used for padding.
+        median_filter: int or list, the number of frames for which to apply median window (smoothing). (int: fixed, list: class-wise)
+        decode_weak: int or None. flag to choose which method to use for utilizing weak prediction. (0: no weak prediction used, 1: weak prediction masking, 2: weak SED)
+        pad_indicies: torch.Tensor, batch of indices which have been used for padding. (one index element is in range (0, 1])
 
     Returns:
         dict of predictions, each keys is a threshold and the value is the DataFrame of predictions.
     """
     # Init a dataframe per threshold
-    prediction_dfs = {}
+    pred_dict_by_thres = {}
     for threshold in thresholds:
-        prediction_dfs[threshold] = pd.DataFrame()
+        pred_dict_by_thres[threshold] = pd.DataFrame()
 
-    for j in range(strong_preds.shape[0]):  # over batches
+    for batch_indx in range(strong_preds_batch.shape[0]):  # over batches
         for c_th in thresholds:
-            c_preds = strong_preds[j]
-            if pad_indx is not None:
-                true_len = int(c_preds.shape[-1] * pad_indx[j].item())
-                c_preds = c_preds[:true_len]
-            pred = c_preds.transpose(0, 1).detach().cpu().numpy()
-            pred = pred > c_th
-            pred = scipy.ndimage.filters.median_filter(pred, (median_filter, 1))
-            pred = encoder.decode_strong(pred)
-            pred = pd.DataFrame(pred, columns=["event_label", "onset", "offset"])
-            pred["filename"] = Path(filenames[j]).stem + ".wav"
-            prediction_dfs[c_th] = prediction_dfs[c_th].append(pred, ignore_index=True)
+            strong_preds = strong_preds_batch[batch_indx]
+            if pad_indicies is not None:
+                true_len = int(strong_preds.shape[-1] * pad_indicies[batch_indx].item())
+                strong_preds = strong_preds[:true_len]
+            strong_preds = strong_preds.transpose(0, 1).detach().cpu().numpy()  # size = (frames, n_class)
+            if decode_weak in [1, 2]:
+                for class_indx in range(weak_preds_batch.size(1)):
+                    if weak_preds_batch[batch_indx, class_indx] < c_th:
+                        strong_preds[:, class_indx] = 0
+                    elif decode_weak >= 2:  # decode_weak == 2
+                        strong_preds[:, class_indx] = 1
+            if decode_weak is None or decode_weak < 2:  # decode_weak == None or 0 or 1
+                strong_preds = strong_preds > c_th
 
-    return prediction_dfs
+                if type(median_filter) == int:
+                    strong_preds = scipy.ndimage.filters.median_filter(strong_preds, (median_filter, 1))
+                elif type(median_filter) == list:  # apply class-wise median filter
+                    frames_list = [
+                        scipy.ndimage.filters.median_filter(strong_preds[:, indx][:, np.newaxis], (filt_len, 1))
+                        for indx, filt_len in enumerate(median_filter)
+                    ]
+                    strong_preds = np.hstack(frames_list)
+                else:
+                    raise Exception("unknown type of median_filter")
+
+            strong_preds = encoder.decode_strong(strong_preds)
+            strong_preds = pd.DataFrame(strong_preds, columns=["event_label", "onset", "offset"])
+            strong_preds["filename"] = Path(filenames[batch_indx]).stem + ".wav"
+            pred_dict_by_thres[c_th] = pred_dict_by_thres[c_th].append(strong_preds, ignore_index=True)
+
+    return pred_dict_by_thres
 
 
 def convert_to_event_based(weak_dataframe):
-    """ Convert a weakly labeled DataFrame ('filename', 'event_labels') to a DataFrame strongly labeled
+    """Convert a weakly labeled DataFrame ('filename', 'event_labels') to a DataFrame strongly labeled
     ('filename', 'onset', 'offset', 'event_label').
 
     Args:
@@ -66,14 +94,12 @@ def convert_to_event_based(weak_dataframe):
 
         events = r["event_labels"].split(",")
         for e in events:
-            new.append(
-                {"filename": r["filename"], "event_label": e, "onset": 0, "offset": 1}
-            )
+            new.append({"filename": r["filename"], "event_label": e, "onset": 0, "offset": 1})
     return pd.DataFrame(new)
 
 
 def log_sedeval_metrics(predictions, ground_truth, save_dir=None):
-    """ Return the set of metrics from sed_eval
+    """Return the set of metrics from sed_eval
     Args:
         predictions: pd.DataFrame, the dataframe of predictions.
         ground_truth: pd.DataFrame, the dataframe of groundtruth.
@@ -123,11 +149,7 @@ def parse_jams(jams_list, encoder, out_json):
         )
 
         for indx, sound in enumerate(jdata["annotations"][0]["data"]):
-            source_name = Path(
-                jdata["annotations"][-1]["sandbox"]["scaper"][
-                    "isolated_events_audio_path"
-                ][indx]
-            ).stem
+            source_name = Path(jdata["annotations"][-1]["sandbox"]["scaper"]["isolated_events_audio_path"][indx]).stem
             source_file = os.path.join(
                 Path(jamfile).parent,
                 Path(jamfile).stem + "_events",
@@ -137,9 +159,7 @@ def parse_jams(jams_list, encoder, out_json):
             if sound["value"]["role"] == "background":
                 backgrounds.append(source_file)
             else:  # it is an event
-                if (
-                    sound["value"]["label"] not in encoder.labels
-                ):  # correct different labels
+                if sound["value"]["label"] not in encoder.labels:  # correct different labels
                     if sound["value"]["label"].startswith("Frying"):
                         sound["value"]["label"] = "Frying"
                     elif sound["value"]["label"].startswith("Vacuum_cleaner"):
@@ -151,8 +171,7 @@ def parse_jams(jams_list, encoder, out_json):
                     {
                         "filename": source_file,
                         "onset": sound["value"]["event_time"],
-                        "offset": sound["value"]["event_time"]
-                        + sound["value"]["event_duration"],
+                        "offset": sound["value"]["event_time"] + sound["value"]["event_duration"],
                         "event_label": sound["value"]["label"],
                     }
                 )
@@ -165,11 +184,11 @@ def parse_jams(jams_list, encoder, out_json):
 def generate_tsv_wav_durations(audio_dir, out_tsv):
     """
         Generate a dataframe with filename and duration of the file
-    
+
     Args:
         audio_dir: str, the path of the folder where audio files are (used by glob.glob)
         out_tsv: str, the path of the output tsv file
-    
+
     Returns:
         pd.DataFrame: the dataframe containing filenames and durations
     """

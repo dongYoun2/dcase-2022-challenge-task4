@@ -1,0 +1,29 @@
+submission:
+  save_dir: "./submission"
+  system_dir: "desed-lab/exps/system1"
+  from_epoch: 200
+  to_epoch: 500
+  step: 2
+test:
+  save_dir: "./test"
+  test_tsv: "../../data/dcase/dataset/metadata/validation/validation.tsv"
+  test_dur: "../../data/dcase/dataset/metadata/validation/validation_durations.tsv"
+public_eval:
+  save_dir: "./public_eval"
+  system_dir: "desed-lab/exps/system2-seed0"
+  public_eval_tsv: "../../data/DESED_public_eval/metadata/eval/public.tsv"
+  public_eval_dur: "../../data/DESED_public_eval/metadata/eval/public_durations.tsv"
+  from_epoch: 200
+  to_epoch: 500
+  step: 2
+postprocess:
+  n_test_thresholds: 100
+  decode_weak: 0
+  median_window: [7, 8, 5, 4, 5, 41, 48, 40, 11, 55] # (fixed: int, class-wise: list)
+data:
+  audio_max_len: 10
+  net_subsample: 4
+  fs: 16000
+feats:
+  n_filters: 2048
+  hop_length: 256

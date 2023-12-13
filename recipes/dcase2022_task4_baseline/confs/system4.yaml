@@ -1,0 +1,117 @@
+training:
+  batch_size: [144, 12, 24] # [strong, weak, unlabel]
+  batch_size_val: 256
+  const_max: 2 # max weight used for self supervised loss
+  num_workers: 6 # change according to your cpu
+  n_epochs: 500 # max num epochs
+  early_stop_patience: 500 # Same as number of epochs by default, so no early stopping used
+  checkpoint_params:
+    every_n_epochs: 5
+    save_last: true
+    save_top_k: -1
+  accumulate_batches: 1
+  gradient_clip: 0. # 0 no gradient clipping
+  median_window: 7 # length of median filter used to smooth prediction in inference (nb of output frames)
+  val_thresholds: [0.5] # thresholds used to compute f1 intersection in validation.
+  n_test_thresholds: 50 # number of thresholds used to compute psds in test
+  ema_factor: 0.999 # ema factor for mean teacher
+  loss_weak_w: 0.1 # weight for weak classification cost
+  sup_loss: AsymmetricFocalLoss
+  sup_loss_config:
+    gamma: 0.0625
+    zeta: 1
+  self_sup_loss: MSELoss # bce or mse for self supervised mean teacher loss (consistency loss)
+  backend: dp # pytorch lightning backend, ddp, dp or None
+  validation_interval: 5 # perform validation every X epoch, 1 default
+  weak_split: 0.9
+  seed: 0
+  frame_shift_rate: 0.2
+  mixup_rate: 0.5
+  mixup: soft # Soft mixup gives the ratio of the mix to the labels, hard mixup gives a 1 to every label present.
+  time_mask_rate: 0.2 # rate of masked time frames
+  add_noise:
+    mix_prob: 0.5
+    num_workers: 16
+    snr_high: 20
+    snr_low: 5
+  filter_aug: # filter augmentation. (do not change label information.)
+    n_transform: 1 # 0: no augmentation is applied. 1: same augmentation  is applied on student/teacher model input. 2: different augmentations is applied on student/teacher model input.
+    filter_db_range: [ -6, 6 ]         # db range of FilterAugment to be applied on each band
+    filter_bands: [ 3, 6 ]             # range of frequency band number in FilterAugment
+    filter_minimum_bandwidth: 6
+    filter_type: linear # filter type. [linear | step]
+  spec_aug:
+    freq_mask_width: [0, 13]
+    time_mask_width: [0, 0]
+  obj_metric_strong_type: intersection
+  precision: 32
+scaler:
+  statistic: instance # instance or dataset-wide statistic
+  normtype: minmax # minmax or standard or mean normalization
+  dims: [1, 2] # dimensions over which normalization is applied
+  savepath: ./scaler.ckpt # path to scaler checkpoint
+data: # change with your paths if different.
+  # NOTE: if you have data in 44kHz only then synth_folder will be the path where
+  # resampled data will be placed.
+  synth_folder: "../../data/dcase/dataset/audio/train/synthetic21_train/soundscapes_16k/"
+  synth_folder_44k: "../../data/dcase/dataset/audio/train/synthetic21_train/soundscapes/"
+  synth_tsv:  "../../data/dcase/dataset/metadata/train/synthetic21_train/soundscapes.tsv"
+  strong_folder: "../../data/dcase/dataset/audio/train/strong_label_real_16k/"
+  strong_folder_44k: "../../data/dcase/dataset/audio/train/strong_label_real/"
+  strong_tsv: "../../data/dcase/dataset/metadata/train/audioset_strong.tsv"
+  audioset_strong_folder: "../../data/audioset/train_strong_16k"
+  audioset_strong_folder_44k: "../../data/audioset/train_strong"
+  audioset_strong_tsv: "../../data/audioset/audioset2desed_train_strong.tsv"
+  weak_folder: "../../data/dcase/dataset/audio/train/weak_16k/"
+  weak_folder_44k: "../../data/dcase/dataset/audio/train/weak/"
+  weak_tsv: "../../data/dcase/dataset/metadata/train/weak.tsv"
+  unlabeled_folder: "../../data/dcase/dataset/audio/train/unlabel_in_domain_16k/"
+  unlabeled_folder_44k: "../../data/dcase/dataset/audio/train/unlabel_in_domain/"
+  synth_val_folder: "../../data/dcase/dataset/audio/validation/synthetic21_validation/soundscapes_16k/"
+  synth_val_folder_44k: "../../data/dcase/dataset/audio/validation/synthetic21_validation/soundscapes/"
+  synth_val_tsv:  "../../data/dcase/dataset/metadata/validation/synthetic21_validation/soundscapes.tsv"
+  synth_val_dur: "../../data/dcase/dataset/metadata/validation/synthetic21_validation/durations.tsv"
+  test_folder: "../../data/dcase/dataset/audio/validation/validation_16k/"
+  test_folder_44k: "../../data/dcase/dataset/audio/validation/validation/"
+  test_tsv: "../../data/dcase/dataset/metadata/validation/validation.tsv"
+  test_dur: "../../data/dcase/dataset/metadata/validation/validation_durations.tsv"
+  # eval_folder: "../../data/dcase/dataset/audio/eval21_16k"
+  # eval_folder_44k: "../../data/dcase/dataset/audio/eval21"
+  eval_folder: "../../data/audioset/train_strong_16k"
+  eval_folder_44k: "../../data/audioset/train_strong"
+  audio_max_len: 10
+  fs: 16000
+  net_subsample: 4
+opt:
+  name: "Adam"
+  params:
+    lr: 0.001
+    betas: [0.9, 0.999]
+scheduler:
+  name: "ExponentialWarmup"
+  params:
+    max_lr: 0.001
+    n_epochs_warmup: 50 # num epochs used for exponential warmup
+feats:
+  n_mels: 128
+  n_filters: 2048
+  hop_length: 256
+  n_window: 2048
+  sample_rate: 16000
+  f_min: 0
+  f_max: 8000
+net:
+  name: "FDCRNN"
+  conv_dropout: 0.5
+  rnn_layers: 2
+  n_in_channel: 1
+  nclass: 10
+  attention: "softmax"
+  n_RNN_cell: 128
+  activation: cg
+  kernel_size: [3, 3, 3, 3, 3, 3, 3]
+  padding: [1, 1, 1, 1, 1, 1, 1]
+  stride: [1, 1, 1, 1, 1, 1, 1]
+  nb_filters: [ 32, 64, 128, 256, 256, 256, 256 ]
+  pooling: [ [ 2, 2 ], [ 2, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ] ]
+  rec_dropout: 0

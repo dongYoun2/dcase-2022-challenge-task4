@@ -36,15 +36,12 @@ def mixup(data, target=None, alpha=0.2, beta=0.2, mixup_label_type="soft"):
         mixed_data = c * data + (1 - c) * data[perm, :]
         if target is not None:
             if mixup_label_type == "soft":
-                mixed_target = torch.clamp(
-                    c * target + (1 - c) * target[perm, :], min=0, max=1
-                )
+                mixed_target = torch.clamp(c * target + (1 - c) * target[perm, :], min=0, max=1)
             elif mixup_label_type == "hard":
                 mixed_target = torch.clamp(target + target[perm, :], min=0, max=1)
             else:
                 raise NotImplementedError(
-                    f"mixup_label_type: {mixup_label_type} not implemented. choice in "
-                    f"{'soft', 'hard'}"
+                    f"mixup_label_type: {mixup_label_type} not implemented. choice in " f"{'soft', 'hard'}"
                 )
 
             return mixed_data, mixed_target
@@ -53,7 +50,7 @@ def mixup(data, target=None, alpha=0.2, beta=0.2, mixup_label_type="soft"):
 
 
 def add_noise(mels, snrs=(6, 30), dims=(1, 2)):
-    """ Add white noise to mels spectrograms
+    """Add white noise to mels spectrograms
     Args:
         mels: torch.tensor, mels spectrograms to apply the white noise to.
         snrs: int or tuple, the range of snrs to choose from if tuple (uniform)
@@ -63,9 +60,7 @@ def add_noise(mels, snrs=(6, 30), dims=(1, 2)):
         torch.Tensor of mels with noise applied
     """
     if isinstance(snrs, (list, tuple)):
-        snr = (snrs[0] - snrs[1]) * torch.rand(
-            (mels.shape[0],), device=mels.device
-        ).reshape(-1, 1, 1) + snrs[1]
+        snr = (snrs[0] - snrs[1]) * torch.rand((mels.shape[0],), device=mels.device).reshape(-1, 1, 1) + snrs[1]
     else:
         snr = snrs
 

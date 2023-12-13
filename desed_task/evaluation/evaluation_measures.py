@@ -29,7 +29,7 @@ def get_event_list_current_file(df, fname):
 
 
 def psds_results(psds_obj):
-    """ Compute psds scores
+    """Compute psds scores
     Args:
         psds_obj: psds_eval.PSDSEval object with operating points.
     Returns:
@@ -46,10 +46,8 @@ def psds_results(psds_obj):
         raise EnvironmentError
 
 
-def event_based_evaluation_df(
-    reference, estimated, t_collar=0.200, percentage_of_length=0.2
-):
-    """ Calculate EventBasedMetric given a reference and estimated dataframe
+def event_based_evaluation_df(reference, estimated, t_collar=0.200, percentage_of_length=0.2):
+    """Calculate EventBasedMetric given a reference and estimated dataframe
 
     Args:
         reference: pd.DataFrame containing "filename" "onset" "offset" and "event_label" columns which describe the
@@ -77,12 +75,8 @@ def event_based_evaluation_df(
     )
 
     for fname in evaluated_files:
-        reference_event_list_for_current_file = get_event_list_current_file(
-            reference, fname
-        )
-        estimated_event_list_for_current_file = get_event_list_current_file(
-            estimated, fname
-        )
+        reference_event_list_for_current_file = get_event_list_current_file(reference, fname)
+        estimated_event_list_for_current_file = get_event_list_current_file(estimated, fname)
 
         event_based_metric.evaluate(
             reference_event_list=reference_event_list_for_current_file,
@@ -93,17 +87,17 @@ def event_based_evaluation_df(
 
 
 def segment_based_evaluation_df(reference, estimated, time_resolution=1.0):
-    """ Calculate SegmentBasedMetrics given a reference and estimated dataframe
+    """Calculate SegmentBasedMetrics given a reference and estimated dataframe
 
-        Args:
-            reference: pd.DataFrame containing "filename" "onset" "offset" and "event_label" columns which describe the
-                reference events
-            estimated: pd.DataFrame containing "filename" "onset" "offset" and "event_label" columns which describe the
-                estimated events to be compared with reference
-            time_resolution: float, the time resolution of the segment based metric
-        Returns:
-             sed_eval.sound_event.SegmentBasedMetrics with the scores
-        """
+    Args:
+        reference: pd.DataFrame containing "filename" "onset" "offset" and "event_label" columns which describe the
+            reference events
+        estimated: pd.DataFrame containing "filename" "onset" "offset" and "event_label" columns which describe the
+            estimated events to be compared with reference
+        time_resolution: float, the time resolution of the segment based metric
+    Returns:
+         sed_eval.sound_event.SegmentBasedMetrics with the scores
+    """
     evaluated_files = reference["filename"].unique()
 
     classes = []
@@ -116,12 +110,8 @@ def segment_based_evaluation_df(reference, estimated, time_resolution=1.0):
     )
 
     for fname in evaluated_files:
-        reference_event_list_for_current_file = get_event_list_current_file(
-            reference, fname
-        )
-        estimated_event_list_for_current_file = get_event_list_current_file(
-            estimated, fname
-        )
+        reference_event_list_for_current_file = get_event_list_current_file(reference, fname)
+        estimated_event_list_for_current_file = get_event_list_current_file(estimated, fname)
 
         segment_based_metric.evaluate(
             reference_event_list=reference_event_list_for_current_file,
@@ -132,19 +122,15 @@ def segment_based_evaluation_df(reference, estimated, time_resolution=1.0):
 
 
 def compute_sed_eval_metrics(predictions, groundtruth):
-    """ Compute sed_eval metrics event based and segment based with default parameters used in the task.
+    """Compute sed_eval metrics event based and segment based with default parameters used in the task.
     Args:
         predictions: pd.DataFrame, predictions dataframe
         groundtruth: pd.DataFrame, groundtruth dataframe
     Returns:
         tuple, (sed_eval.sound_event.EventBasedMetrics, sed_eval.sound_event.SegmentBasedMetrics)
     """
-    metric_event = event_based_evaluation_df(
-        groundtruth, predictions, t_collar=0.200, percentage_of_length=0.2
-    )
-    metric_segment = segment_based_evaluation_df(
-        groundtruth, predictions, time_resolution=1.0
-    )
+    metric_event = event_based_evaluation_df(groundtruth, predictions, t_collar=0.200, percentage_of_length=0.2)
+    metric_segment = segment_based_evaluation_df(groundtruth, predictions, time_resolution=1.0)
 
     return metric_event, metric_segment
 
@@ -157,7 +143,7 @@ def compute_per_intersection_macro_f1(
     gtc_threshold=0.5,
     cttc_threshold=0.3,
 ):
-    """ Compute F1-score per intersection, using the defautl
+    """Compute F1-score per intersection, using the defautl
     Args:
         prediction_dfs: dict, a dictionary with thresholds keys and predictions dataframe
         ground_truth_file: pd.DataFrame, the groundtruth dataframe
@@ -222,9 +208,7 @@ def compute_psds_from_operating_points(
         # see issue https://github.com/audioanalytic/psds_eval/issues/3
         det["index"] = range(1, len(det) + 1)
         det = det.set_index("index")
-        psds_eval.add_operating_point(
-            det, info={"name": f"Op {i + 1:02d}", "threshold": k}
-        )
+        psds_eval.add_operating_point(det, info={"name": f"Op {i + 1:02d}", "threshold": k})
 
     psds_score = psds_eval.psds(alpha_ct=alpha_ct, alpha_st=alpha_st, max_efpr=max_efpr)
 

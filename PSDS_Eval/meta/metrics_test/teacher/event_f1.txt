@@ -1,9 +1,9 @@
 Event based metrics (onset-offset)
 ========================================
   Evaluated length                  : 10459.12 sec
-  Evaluated files                   : 1168 
-  Evaluate onset                    : True 
-  Evaluate offset                   : True 
+  Evaluated files                   : 1168
+  Evaluate onset                    : True
+  Evaluate offset                   : True
   T collar                          : 200.00 ms
   Offset (length)                   : 20.00 %
 
@@ -14,10 +14,10 @@ Event based metrics (onset-offset)
     Precision                       : 47.87 %
     Recall                          : 37.97 %
   Error rate
-    Error rate (ER)                 : 1.01 
-    Substitution rate               : 0.02 
-    Deletion rate                   : 0.60 
-    Insertion rate                  : 0.39 
+    Error rate (ER)                 : 1.01
+    Substitution rate               : 0.02
+    Deletion rate                   : 0.60
+    Insertion rate                  : 0.39
 
   Class-wise average metrics (macro-average)
   ======================================
@@ -26,10 +26,10 @@ Event based metrics (onset-offset)
     Precision                       : 43.52 %
     Recall                          : 42.74 %
   Error rate
-    Error rate (ER)                 : 1.14 
-    Deletion rate                   : 0.57 
-    Insertion rate                  : 0.56 
-  
+    Error rate (ER)                 : 1.14
+    Deletion rate                   : 0.57
+    Insertion rate                  : 0.56
+
 
   Class-wise metrics
   ======================================

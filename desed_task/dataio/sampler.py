@@ -35,14 +35,12 @@ class ConcatDatasetBatchSampler(Sampler):
 
         if not isinstance(samplers, (list, tuple)):
             raise ValueError(
-                "samplers should be a list or tuple of Pytorch Samplers, "
-                "but got samplers={}".format(batch_sizes)
+                "samplers should be a list or tuple of Pytorch Samplers, " "but got samplers={}".format(batch_sizes)
             )
 
         if not isinstance(batch_sizes, (list, tuple)):
             raise ValueError(
-                "batch_sizes should be a list or tuple of integers, "
-                "but got batch_sizes={}".format(batch_sizes)
+                "batch_sizes should be a list or tuple of integers, " "but got batch_sizes={}".format(batch_sizes)
             )
 
         if not len(batch_sizes) == len(samplers):

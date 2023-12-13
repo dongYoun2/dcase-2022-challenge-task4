@@ -20,21 +20,21 @@ A possible installation: `sudo apt install ffmpeg`
 
  **Training**
 
-If training appears too slow, check with `top` and with `nvidia-smi` that you 
-are effectively using a GPU and not the CPU. 
-If running `python train_sed.py` uses by default the CPU you may have **pytorch** installed 
-without CUDA support. 
+If training appears too slow, check with `top` and with `nvidia-smi` that you
+are effectively using a GPU and not the CPU.
+If running `python train_sed.py` uses by default the CPU you may have **pytorch** installed
+without CUDA support.
 
-Check with IPython by running this pytorch line `torch.rand((1)).cuda()` 
+Check with IPython by running this pytorch line `torch.rand((1)).cuda()`
 If you encounter an error install CUDA-enabled pytorch from https://pytorch.org/
-Check again till you can run `torch.rand((1)).cuda()` successfully. 
+Check again till you can run `torch.rand((1)).cuda()` successfully.
 
 ## Dataset
 You can download the development dataset using the script: `generate_dcase_task4_2022.py`.
 The development dataset is composed of two parts:
 - real-world data ([DESED dataset][desed]): this part of the dataset is composed of strong labels, weak labels, unlabeled, and validation data which are coming from [Audioset][audioset].
 
-- synthetically generated data: this part of the dataset is composed of synthetically soundscapes, generated using [Scaper][scaper]. 
+- synthetically generated data: this part of the dataset is composed of synthetically soundscapes, generated using [Scaper][scaper].
 
 ### Usage:
 Run the command `python generate_dcase_task4_2022.py --basedir="../../data"` to download the dataset (the user can change basedir to the desired data folder.)
@@ -47,9 +47,9 @@ If the user already has downloaded part of the dataset, it does not need to re-d
 
  For example, if the user already has downloaded the real and synthetic part of the set, it can integrate the dataset with the strong labels of the DESED dataset with the following command:
 
- `python generate_dcase_task4_2022.py --only_strong` 
+ `python generate_dcase_task4_2022.py --only_strong`
 
- If the user wants to download only the synthetic part of the dataset, it could be done with the following command: 
+ If the user wants to download only the synthetic part of the dataset, it could be done with the following command:
 
  `python generate_dcase_task4_2022.py --only_synth`
 
@@ -60,10 +60,10 @@ organisers to get the complete dataset** (in priority to Francesca Ronchini and 
 
 ### Development dataset
 
-The dataset is composed by 4 different splits of training data: 
+The dataset is composed by 4 different splits of training data:
 - Synthetic training set with strong annotations
 - Strong labeled training set **(only for the SED Audioset baseline)**
-- Weak labeled training set 
+- Weak labeled training set
 - Unlabeled in domain training set
 
 #### Synthetic training set with strong annotations
@@ -76,11 +76,11 @@ The strong annotations are provided in a tab separated csv file under the follow
 
 For example: YOTsn73eqbfc_10.000_20.000.wav 0.163 0.665 Alarm_bell_ringing
 
-#### Strong labeled training set 
+#### Strong labeled training set
 
-This set is composed of **3470** audio clips coming from [Audioset][audioset]. 
+This set is composed of **3470** audio clips coming from [Audioset][audioset].
 
-**This set is used at training only for the SED Audioset baseline.** 
+**This set is used at training only for the SED Audioset baseline.**
 
 The strong annotations are provided in a tab separated csv file under the following format:
 
@@ -89,9 +89,9 @@ The strong annotations are provided in a tab separated csv file under the follow
 For example: Y07fghylishw_20.000_30.000.wav 0.163 0.665 Dog
 
 
-#### Weak labeled training set 
+#### Weak labeled training set
 
-This set contains **1578** clips (2244 class occurrences) for which weak annotations have been manually verified for a small subset of the training set. 
+This set contains **1578** clips (2244 class occurrences) for which weak annotations have been manually verified for a small subset of the training set.
 
 The weak annotations are provided in a tab separated csv file under the following format:
 
@@ -106,16 +106,16 @@ This set contains **14412** clips. The clips are selected such that the distribu
 
 
 
-The dataset uses [FUSS][fuss_git], [FSD50K][FSD50K], [desed_soundbank][desed] and [desed_real][desed]. 
+The dataset uses [FUSS][fuss_git], [FSD50K][FSD50K], [desed_soundbank][desed] and [desed_real][desed].
 
-For more information regarding the dataset, please refer to the [previous year DCASE Challenge website][dcase_21_dataset]. 
+For more information regarding the dataset, please refer to the [previous year DCASE Challenge website][dcase_21_dataset].
 
 
 
 ## Training
 We provide **three** baselines for the task:
 - SED baseline
-- baseline using pre-trained embedding extractor DNN. 
+- baseline using pre-trained embedding extractor DNN.
 - baseline using Audioset data (real-world strong-label data)
 
 For now, only the SED baseline is available (the missing baseline will be published soon).
@@ -133,27 +133,27 @@ The **SED baseline** can be run from scratch using the following command:
 
 **Common issues**
 
-If you encounter: 
+If you encounter:
 `pytorch_lightning.utilities.exceptions.MisconfigurationException: You requested GPUs: [0]
  But your machine only has: [] (edited) `
 
-or 
+or
 
 `OSError: libc10_cuda.so: cannot open shared object file: No such file or directory`
 
 
-It probably means you have installed CPU-only version of Pytorch or have installed the incorrect 
-**cudatoolkit** version. 
+It probably means you have installed CPU-only version of Pytorch or have installed the incorrect
+**cudatoolkit** version.
 Please install the correct version from https://pytorch.org/
 
 ---
 
-Note that the default training config will use GPU 0. 
+Note that the default training config will use GPU 0.
 Alternatively, we provide a [pre-trained checkpoint][zenodo_pretrained_models] along with tensorboard logs. The baseline can be tested on the development set of the dataset using the following command:
 
 `python train_sed.py --test_from_checkpoint /path/to/downloaded.ckpt`
 
-The tensorboard logs can be tested using the command `tensorboard --logdir="path/to/exp_folder"`. 
+The tensorboard logs can be tested using the command `tensorboard --logdir="path/to/exp_folder"`.
 
 
 ## **(NEW!)** Energy Consumption
@@ -168,16 +168,16 @@ We encourage the participants to provide, for each submitted system (or at least
 3) evaluation set inference
 
 You can refer to [Codecarbon](https://github.com/mlco2/codecarbon) on how to do this (super simple! 😉 )
-or to this baseline code see `local/sed_trained.py` for some hints on 
+or to this baseline code see `local/sed_trained.py` for some hints on
 how we are doing this for the baseline system.
 
 
-**Important** 
+**Important**
 
 In addition to this, we kindly suggest the participants to
 provide the energy consumption in kWh (using the same hardware used for 2) and 3)) of:
 
-1) devtest inference for baseline system using: 
+1) devtest inference for baseline system using:
 
 `python train_sed.py --test_from_checkpoint /path/to/downloaded.ckpt`
 You can find the energy consumed in kWh in `./exp/2022_baseline/devtest_codecarbon/devtest_tot_kwh.txt`
@@ -189,17 +189,17 @@ You can find the energy consumed in kWh in `./exp/2022_baseline/evaluation_codec
 **Why we require this ?**
 
 Energy consumption depends on hardware and each participant uses
-different hardware. 
+different hardware.
 
-To obviate for this difference we use the baseline inference kWh energy consumption 
+To obviate for this difference we use the baseline inference kWh energy consumption
 as a common reference. Because of this, it is important that the
-inference energy consumption figures for both submitted system 
-and baseline are computed on same hardware under similar loading. 
+inference energy consumption figures for both submitted system
+and baseline are computed on same hardware under similar loading.
 
 
 #### Results:
 
-Dataset | **PSDS-scenario1** | **PSDS-scenario2** | *Intersection-based F1* | *Collar-based F1* 
+Dataset | **PSDS-scenario1** | **PSDS-scenario2** | *Intersection-based F1* | *Collar-based F1*
 --------|--------------------|--------------------|-------------------------|-----------------
 Dev-test| **0.336**          | **0.536**          | 64.1%                   | 40.1%
 
@@ -207,13 +207,13 @@ Dev-test| **0.336**          | **0.536**          | 64.1%                   | 40
 
 Dataset | Training  | Dev-Test |
 --------|-----------|--------------------
-**kWh** | **1.717** | **0.030**           
+**kWh** | **1.717** | **0.030**
 
 
 
 Collar-based = event-based. More information about the metrics in the DCASE Challenge [webpage][dcase22_webpage].
 
-The results are from the **student** predictions. 
+The results are from the **student** predictions.
 
 **NOTES**:
 
@@ -232,7 +232,7 @@ Training can be resumed using the following command:
 
 `python train_sed.py --resume_from_checkpoint /path/to/file.ckpt`
 
-In order to make a "fast" run, which could be useful for development and debugging, you can use the following command: 
+In order to make a "fast" run, which could be useful for development and debugging, you can use the following command:
 
 `python train_sed.py --fast_dev_run`
 
@@ -244,9 +244,9 @@ The baseline is the same as the [DCASE 2021 Task 4 baseline][dcase_21_repo], bas
 
 
 The baseline uses a Mean-Teacher model which is a combination of two models: a student model and a
-teacher model, having the same architecture. The student model is the one used at inference while the goal of the teacher is to help the student model during training. The teacher's weight are the exponential average of the student model's weights. The models are a combination of a convolutional neural network (CNN) and a recurrent neural network (RNN) followed by an attention layer. The output of the RNN gives strong predictions while the output of the attention layer gives the weak predictions [2]. 
+teacher model, having the same architecture. The student model is the one used at inference while the goal of the teacher is to help the student model during training. The teacher's weight are the exponential average of the student model's weights. The models are a combination of a convolutional neural network (CNN) and a recurrent neural network (RNN) followed by an attention layer. The output of the RNN gives strong predictions while the output of the attention layer gives the weak predictions [2].
 
-Figure 1 shows an illustration of the baseline model. 
+Figure 1 shows an illustration of the baseline model.
 
 | ![This is an image](./img/mean_teacher.png) |
 |:--:|
@@ -279,11 +279,11 @@ Dev-test| **0.351**          | **0.552**          | 64.3%                   | 42
 
 Dataset | Training  | Dev-Test |
 --------|-----------|--------------------
-**kWh** | **2.418** | **0.027**           
+**kWh** | **2.418** | **0.027**
 
 Collar-based = event-based. More information about the metrics in the DCASE Challenge [webpage][dcase22_webpage].
 
-The results are computed from the **student** predictions. 
+The results are computed from the **student** predictions.
 
 All the comments related to the possibility of resuming the training and the fast development run in the [SED baseline][sed_baseline] are valid also in this case.
 
@@ -291,12 +291,12 @@ All the comments related to the possibility of resuming the training and the fas
 We added a new baseline which exploits pre-trained models such as [PANNs](https://arxiv.org/abs/1912.10211) and [AST](https://arxiv.org/abs/2104.01778) to increase the performance.
 to increase the performance.
 
-In this baseline the frame-level or whole-clip level features are used in a late-fusion fashion 
+In this baseline the frame-level or whole-clip level features are used in a late-fusion fashion
 with the existing CRNN baseline classifier.
 See `desed_task/nnet/CRNN.py` for details. The whole-clip features are concatenated with CNN extracted features in the baseline
-CRNN classifier. 
+CRNN classifier.
 
-Regarding he frame-level features, since they have different sequence length w.r.t. CNN features 
+Regarding he frame-level features, since they have different sequence length w.r.t. CNN features
 we use a trainable RNN-based encoder to encode those to a fixed dim output (obtaining again a whole-clip level embedding).
 This embedding is then concatenated in the same way as the whole-clip features.
 
@@ -314,13 +314,13 @@ pretrained:
  ```
 
 
-You can choose **ast** or **panns**. 
-You can choose whether to keep the pre-trained model **freezed** or train it along with the CRNN architecture. 
-If you want to keep it freezed, we already provide the pre-extracted embeddings for you. 
-This is useful if you want to train with a big batch size because you won't have to store the rather heavy 
-PANNs or AST models on your GPU. 
+You can choose **ast** or **panns**.
+You can choose whether to keep the pre-trained model **freezed** or train it along with the CRNN architecture.
+If you want to keep it freezed, we already provide the pre-extracted embeddings for you.
+This is useful if you want to train with a big batch size because you won't have to store the rather heavy
+PANNs or AST models on your GPU.
 
-Here are the links to the pre-extracted embeddings for AST and PANNs: 
+Here are the links to the pre-extracted embeddings for AST and PANNs:
 
 
 https://zenodo.org/record/6541454#.YnzHq2YzbDI (unalabeled ast)
@@ -329,29 +329,29 @@ https://zenodo.org/record/6539466#.YnvtWmYzbAM (ast synth train, ast synth val,a
 
 https://zenodo.org/record/6518380#.YnvWZGYzbAM (panns, ast weak train, ast devtest)
 
-You can download and unpack them in your preferred directory. 
+You can download and unpack them in your preferred directory.
 Do not forget then to set in the configuration
-above `extracted_embeddings_dir: YOUR_PATH`. 
+above `extracted_embeddings_dir: YOUR_PATH`.
 The script expects a folder structure like this:
 
 ```
 YOUR_PATH |--- ast
-                  |----  devtest.hdf5    
+                  |----  devtest.hdf5
                   |----  synth_train.hdf5
                   |----  unlabeled_train.hdf5
                   |----  weak_train.hdf5
                   |----  weak_val.hdf5
-                  |----  synth_val.hdf5   
+                  |----  synth_val.hdf5
           |--- panns
-                  |----  devtest.hdf5    
+                  |----  devtest.hdf5
                   |----  synth_train.hdf5
                   |----  unlabeled_train.hdf5
                   |----  weak_train.hdf5
                   |----  weak_val.hdf5
-                  |----  synth_val.hdf5 
+                  |----  synth_val.hdf5
 ```
 
-You can also select if you want to do late fusion with global, whole-clip features from PANNs or 
+You can also select if you want to do late fusion with global, whole-clip features from PANNs or
 frame-level features in `./confs/pretrained.yaml`:
 ```yaml
   nb_filters: [ 16, 32, 64, 128, 128, 128, 128 ]
@@ -365,9 +365,9 @@ frame-level features in `./confs/pretrained.yaml`:
 **The training can be started simply with**
 
 `python train_pretrained.py`
-By default this uses AST with frame-level embeddings. The pre-trained model is freezed and expects the pre-extracted AST 
-embeddings in a local folder `./embeddings` as you can see from the details provided before about the YAML config. 
-Thus you would need to download the AST embeddings from the Zenodo links above, unless you set `freezed: False`. 
+By default this uses AST with frame-level embeddings. The pre-trained model is freezed and expects the pre-extracted AST
+embeddings in a local folder `./embeddings` as you can see from the details provided before about the YAML config.
+Thus you would need to download the AST embeddings from the Zenodo links above, unless you set `freezed: False`.
 However, the latter requires significant GPU memory.
 
 Also in this case, we provide a [pre-trained checkpoint][zenodo_pretrained_audioset_models]. The baseline can be tested on the development set of the dataset using the following command:
@@ -387,11 +387,11 @@ Dev-test| **32.24%**          |    **72.22%**       | **90.34**               | 
 
 Dataset | Training | Dev-Test |
 --------|----------|--------------------
-**kWh** | **4.41** | **0.036**           
+**kWh** | **4.41** | **0.036**
 
 Collar-based = event-based. More information about the metrics in the DCASE Challenge [webpage][dcase22_webpage].
 
-The results are computed from the **teacher** predictions. 
+The results are computed from the **teacher** predictions.
 
 All the comments related to the possibility of resuming the training and the fast development run in the [SED baseline][sed_baseline] are valid also in this case.
 
@@ -400,7 +400,7 @@ All the comments related to the possibility of resuming the training and the fas
 
 **Architecture**
 
-The architecture of the SED Audioset baseline is the same as the [SED baseline][sed_baseline]. 
+The architecture of the SED Audioset baseline is the same as the [SED baseline][sed_baseline].
 
 
 [audioset]: https://research.google.com/audioset/
@@ -412,7 +412,7 @@ The architecture of the SED Audioset baseline is the same as the [SED baseline][
 [fsd50k]: https://zenodo.org/record/4060432
 [zenodo_pretrained_models]: https://zenodo.org/record/4639817
 [zenodo_pretrained_audioset_models]: https://zenodo.org/record/6447197
-[zenodo_pretrained_ast_embedding_model]: 
+[zenodo_pretrained_ast_embedding_model]:
 [google_sourcesep_repo]: https://github.com/google-research/sound-separation/tree/master/datasets/yfcc100m
 [sdk_installation_instructions]: https://cloud.google.com/sdk/docs/install
 [zenodo_evaluation_dataset]: https://zenodo.org/record/4892545#.YMHH_DYzadY
@@ -433,5 +433,5 @@ The architecture of the SED Audioset baseline is the same as the [SED baseline][
 
 [7] Ronchini, Francesca, et al. "The impact of non-target events in synthetic soundscapes for sound event detection." arXiv preprint arXiv:2109.14061 (DCASE2021)
 
-[8] Ronchini, Francesca, et al. "A benchmark of state-of-the-art sound event detection systems evaluated on synthetic soundscapes." arXiv preprint arXiv:2202.01487 
+[8] Ronchini, Francesca, et al. "A benchmark of state-of-the-art sound event detection systems evaluated on synthetic soundscapes." arXiv preprint arXiv:2202.01487
 

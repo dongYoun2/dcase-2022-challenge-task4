@@ -1,4 +1,5 @@
 import argparse
+import time
 import warnings
 
 import numpy as np
@@ -8,65 +9,74 @@ import random
 import torch
 import yaml
 
+from pathlib import Path
+from typing import Optional, Dict
+
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from desed_task.dataio import ConcatDatasetBatchSampler
 from desed_task.dataio.datasets import StronglyAnnotatedSet, UnlabeledSet, WeakSet
-from desed_task.nnet.CRNN import CRNN
 from desed_task.utils.encoder import ManyHotEncoder
-from desed_task.utils.schedulers import ExponentialWarmup
 
 from local.classes_dict import classes_labels
 from local.sed_trainer import SEDTask4
 from local.resample_folder import resample_folder
 from local.utils import generate_tsv_wav_durations
+from local.modes import TRAIN, TEST, EVALUATION
+from local import schedulers, optimizers, models
+
+warnings.simplefilter(action="ignore", category=FutureWarning)
 
 
-def resample_data_generate_durations(config_data, test_only=False, evaluation=False):
-    if not test_only:
+def resample_data_generate_durations(config_data, mode):
+    if mode == TRAIN:
         dsets = [
             "synth_folder",
             "synth_val_folder",
             "strong_folder",
+            "audioset_strong_folder",
             "weak_folder",
             "unlabeled_folder",
             "test_folder",
         ]
-    elif test_only:
+    elif mode == TEST:
         dsets = ["test_folder"]
-    else:
+    elif mode == EVALUATION:
         dsets = ["eval_folder"]
+    else:
+        raise Exception("mode has to be TRAIN or TEST or EVALUATION")
 
     for dset in dsets:
         computed = resample_folder(
-            config_data[dset + "_44k"], config_data[dset], target_fs=config_data["fs"]
+            config_data[dset + "_44k"], config_data[dset], target_fs=config_data["fs"], use_mp=True
         )
 
-    if not evaluation:
+    if mode != EVALUATION:
         for base_set in ["synth_val", "test"]:
             if not os.path.exists(config_data[base_set + "_dur"]) or computed:
-                generate_tsv_wav_durations(
-                    config_data[base_set + "_folder"], config_data[base_set + "_dur"]
-                )
+                generate_tsv_wav_durations(config_data[base_set + "_folder"], config_data[base_set + "_dur"])
+
 
 def single_run(
     config,
-    log_dir,
+    exp_dir,
     gpus,
+    mode,
+    ckpt_path=None,
     strong_real=False,
-    checkpoint_resume=None,
-    test_state_dict=None,
+    train_more_synth=False,
+    train_audioset2desed=False,
+    train_validation=False,
     fast_dev_run=False,
-    evaluation=False
 ):
     """
     Running sound event detection baselin
 
     Args:
         config (dict): the dictionary of configuration params
-        log_dir (str): path to log directory
+        exp_dir (str): path to log directory
         gpus (int): number of gpus to use
         checkpoint_resume (str, optional): path to checkpoint to resume from. Defaults to "".
         test_state_dict (dict, optional): if not None, no training is involved. This dictionary is the state_dict
@@ -74,7 +84,7 @@ def single_run(
         fast_dev_run (bool, optional): whether to use a run with only one batch at train and validation, useful
             for development purposes.
     """
-    config.update({"log_dir": log_dir})
+    config.update({"exp_dir": exp_dir})
 
     ##### data prep test ##########
     encoder = ManyHotEncoder(
@@ -86,30 +96,27 @@ def single_run(
         fs=config["data"]["fs"],
     )
 
-    if not evaluation:
+    if mode != EVALUATION:
         devtest_df = pd.read_csv(config["data"]["test_tsv"], sep="\t")
         devtest_dataset = StronglyAnnotatedSet(
             config["data"]["test_folder"],
             devtest_df,
             encoder,
             return_filename=True,
-            pad_to=config["data"]["audio_max_len"]
+            pad_to=config["data"]["audio_max_len"],
         )
     else:
-        devtest_dataset = UnlabeledSet(
-            config["data"]["eval_folder"],
-            encoder,
-            pad_to=None,
-            return_filename=True
-        )
+        devtest_dataset = UnlabeledSet(config["data"]["eval_folder"], encoder, pad_to=None, return_filename=True)
 
     test_dataset = devtest_dataset
 
     ##### model definition  ############
-    sed_student = CRNN(**config["net"])
+    model_name = config["net"].get("name", "CRNN")
+    sed_student = getattr(models, model_name)(**config["net"])
 
-    if test_state_dict is None:
+    if mode == TRAIN:
         ##### data prep train valid ##########
+        strong_set_list = []
         synth_df = pd.read_csv(config["data"]["synth_tsv"], sep="\t")
         synth_set = StronglyAnnotatedSet(
             config["data"]["synth_folder"],
@@ -117,6 +124,7 @@ def single_run(
             encoder,
             pad_to=config["data"]["audio_max_len"],
         )
+        strong_set_list.append(synth_set)
 
         if strong_real:
             strong_df = pd.read_csv(config["data"]["strong_tsv"], sep="\t")
@@ -126,7 +134,37 @@ def single_run(
                 encoder,
                 pad_to=config["data"]["audio_max_len"],
             )
-        
+            strong_set_list.append(strong_set)
+
+        if train_more_synth:
+            synth_df_val = pd.read_csv(config["data"]["synth_val_tsv"], sep="\t")
+            synth_val = StronglyAnnotatedSet(
+                config["data"]["synth_val_folder"],
+                synth_df_val,
+                encoder,
+                pad_to=config["data"]["audio_max_len"],
+            )
+            strong_set_list.append(synth_val)
+
+        if train_audioset2desed:
+            audioset_df = pd.read_csv(config["data"]["audioset_strong_tsv"], sep="\t")
+            audioset = StronglyAnnotatedSet(
+                config["data"]["audioset_strong_folder"],
+                audioset_df,
+                encoder,
+                pad_to=config["data"]["audio_max_len"],
+            )
+            strong_set_list.append(audioset)
+
+        if train_validation:
+            validation_df = pd.read_csv(config["data"]["validation_tsv"], sep="\t")
+            validationset = StronglyAnnotatedSet(
+                config["data"]["validation_folder"],
+                validation_df,
+                encoder,
+                pad_to=config["data"]["audio_max_len"],
+            )
+            strong_set_list.append(validationset)
 
         weak_df = pd.read_csv(config["data"]["weak_tsv"], sep="\t")
         train_weak_df = weak_df.sample(
@@ -148,10 +186,10 @@ def single_run(
             pad_to=config["data"]["audio_max_len"],
         )
 
-        synth_df_val = pd.read_csv(config["data"]["synth_val_tsv"], sep="\t")
-        synth_val = StronglyAnnotatedSet(
-            config["data"]["synth_val_folder"],
-            synth_df_val,
+        real_df_val = pd.read_csv(config["data"]["test_tsv"], sep="\t")
+        real_val = StronglyAnnotatedSet(
+            config["data"]["test_folder"],
+            real_df_val,
             encoder,
             return_filename=True,
             pad_to=config["data"]["audio_max_len"],
@@ -165,8 +203,8 @@ def single_run(
             return_filename=True,
         )
 
-        if strong_real:
-            strong_full_set = torch.utils.data.ConcatDataset([strong_set, synth_set])
+        if len(strong_set_list) > 1:
+            strong_full_set = torch.utils.data.ConcatDataset(strong_set_list)
             tot_train_data = [strong_full_set, weak_set, unlabeled_set]
         else:
             tot_train_data = [synth_set, weak_set, unlabeled_set]
@@ -176,30 +214,32 @@ def single_run(
         samplers = [torch.utils.data.RandomSampler(x) for x in tot_train_data]
         batch_sampler = ConcatDatasetBatchSampler(samplers, batch_sizes)
 
-        valid_dataset = torch.utils.data.ConcatDataset([synth_val, weak_val])
+        valid_dataset = torch.utils.data.ConcatDataset([real_val, weak_val])
 
         ##### training params and optimizers ############
-        epoch_len = min(
+        step_cnt_per_epoch = min(
             [
                 len(tot_train_data[indx])
-                // (
-                    config["training"]["batch_size"][indx]
-                    * config["training"]["accumulate_batches"]
-                )
+                // (config["training"]["batch_size"][indx] * config["training"]["accumulate_batches"])
                 for indx in range(len(tot_train_data))
             ]
         )
 
-        opt = torch.optim.Adam(sed_student.parameters(), 1e-3, betas=(0.9, 0.999))
-        exp_steps = config["training"]["n_epochs_warmup"] * epoch_len
+        opt = getattr(optimizers, config["opt"]["name"])(sed_student.parameters(), **config["opt"]["params"])
         exp_scheduler = {
-            "scheduler": ExponentialWarmup(opt, config["opt"]["lr"], exp_steps),
+            "scheduler": getattr(schedulers, config["scheduler"]["name"])(
+                opt,
+                steps_per_epoch=step_cnt_per_epoch,
+                n_epochs=config["training"]["n_epochs"],
+                **config["scheduler"]["params"],
+            ),
             "interval": "step",
         }
         logger = TensorBoardLogger(
-            os.path.dirname(config["log_dir"]), config["log_dir"].split("/")[-1],
+            os.path.dirname(config["exp_dir"]),
+            config["exp_dir"].split("/")[-1],
         )
-        print(f"experiment dir: {logger.log_dir}")
+        print(f"experiment version dir: {logger.log_dir}")
 
         callbacks = [
             EarlyStopping(
@@ -210,10 +250,7 @@ def single_run(
             ),
             ModelCheckpoint(
                 logger.log_dir,
-                monitor="val/obj_metric",
-                save_top_k=1,
-                mode="max",
-                save_last=True,
+                **config["training"]["checkpoint_params"],
             ),
         ]
     else:
@@ -222,13 +259,14 @@ def single_run(
         batch_sampler = None
         opt = None
         exp_scheduler = None
-        logger = True
+        logger = False
         callbacks = None
 
     desed_training = SEDTask4(
         config,
         encoder=encoder,
         sed_student=sed_student,
+        mode=mode,
         opt=opt,
         train_data=train_dataset,
         valid_data=valid_dataset,
@@ -236,7 +274,6 @@ def single_run(
         train_sampler=batch_sampler,
         scheduler=exp_scheduler,
         fast_dev_run=fast_dev_run,
-        evaluation=evaluation
     )
 
     # Not using the fast_dev_run of Trainer because creates a DummyLogger so cannot check problems with the Logger
@@ -246,28 +283,28 @@ def single_run(
         limit_train_batches = 2
         limit_val_batches = 2
         limit_test_batches = 2
-        n_epochs = 3
+        config["training"]["n_epochs"] = 3
+        config["training"]["validation_interval"] = 1
+
     else:
         flush_logs_every_n_steps = 100
         log_every_n_steps = 40
         limit_train_batches = 1.0
         limit_val_batches = 1.0
         limit_test_batches = 1.0
-        n_epochs = config["training"]["n_epochs"]
-
 
     if len(gpus.split(",")) > 1:
         raise NotImplementedError("Multiple GPUs are currently not supported")
 
     trainer = pl.Trainer(
         precision=config["training"]["precision"],
-        max_epochs=n_epochs,
+        max_epochs=config["training"]["n_epochs"],
         callbacks=callbacks,
         gpus=gpus,
         strategy=config["training"].get("backend"),
         accumulate_grad_batches=config["training"]["accumulate_batches"],
         logger=logger,
-        resume_from_checkpoint=checkpoint_resume,
+        resume_from_checkpoint=ckpt_path if mode == TRAIN else None,
         gradient_clip_val=config["training"]["gradient_clip"],
         check_val_every_n_epoch=config["training"]["validation_interval"],
         num_sanity_val_steps=0,
@@ -278,50 +315,103 @@ def single_run(
         limit_test_batches=limit_test_batches,
     )
 
-    if test_state_dict is None:
-
+    if mode == TRAIN:
         # start tracking energy consumption
         trainer.fit(desed_training)
-        best_path = trainer.checkpoint_callback.best_model_path
-        print(f"best model: {best_path}")
-        test_state_dict = torch.load(best_path)["state_dict"]
+        ckpt_path = trainer.checkpoint_callback.best_model_path
 
-    desed_training.load_state_dict(test_state_dict)
+    desed_training.load_state_dict_by_ckpt_path(ckpt_path)
     trainer.test(desed_training)
 
 
+def set_seed(seed: int):
+    torch.random.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    pl.seed_everything(seed)
+
+
+def get_default_exp_name():
+    assert time.strftime("%Z", time.localtime(time.time())) == "KST"
+    exp_name = time.strftime("%m%d-%H%M%S", time.localtime(time.time()))
+
+    return exp_name
+
+
+def get_exp_name_from_ckpt_path(ckpt_path: str):
+    # assume checkpoint path is in exp version directory
+    ckpt_abs_path: str = str(Path(ckpt_path).resolve())
+    exp_name = ckpt_abs_path.split("/")[-3]
+
+    return exp_name
+
+
 if __name__ == "__main__":
+
+    def str2bool(v):
+        if isinstance(v, bool):
+            return v
+        if v.lower() in ("yes", "true", "t", "y", "1"):
+            return True
+        elif v.lower() in ("no", "false", "f", "n", "0"):
+            return False
+        else:
+            raise argparse.ArgumentTypeError("Boolean value expected.")
+
     parser = argparse.ArgumentParser("Training a SED system for DESED Task")
+    # for training conf and logging
     parser.add_argument(
         "--conf_file",
         default="./confs/default.yaml",
         help="The configuration file with all the experiment parameters.",
     )
     parser.add_argument(
-        "--log_dir",
-        default="./exp/2022_baseline",
+        "--save_path",
+        default="desed-lab/exps",
         help="Directory where to save tensorboard logs, saved models, etc.",
     )
-
+    parser.add_argument(
+        "--exp_name",
+        help="Experiment name (goes after the `save_path`)",
+    )
+    # more training sets
     parser.add_argument(
         "--strong_real",
-        action="store_true",
-        default=False,
+        type=str2bool,
+        default=True,
         help="The strong annotations coming from Audioset will be included in the training phase.",
     )
+    parser.add_argument(
+        "--train_more_synth",
+        type=str2bool,
+        default=True,
+        help="valid set이었던 synthetic21_validation을 훈련 데이터로 추가합니다",
+    )
+    parser.add_argument(
+        "--train_audioset2desed",
+        action="store_true",
+        default=False,
+        help="DESED label로 mapping 된 AudioSet (strong)을 훈련 데이터로 활용합니다",
+    )
+    parser.add_argument(
+        "--train_validation",
+        action="store_true",
+        default=False,
+        help="(제출용) validation set을 훈련 데이터로 추가합니다. test 데이터가 `public_eval`로 변경되고, valid 시점마다 checkpoint 생성됨",
+    )
+    # for checkpoint paths
     parser.add_argument(
         "--resume_from_checkpoint",
         default=None,
         help="Allow the training to be resumed, take as input a previously saved model (.ckpt).",
     )
-    parser.add_argument(
-        "--test_from_checkpoint", default=None, help="Test the model specified"
-    )
+    parser.add_argument("--test_from_checkpoint", default=None, help="Test the model specified")
+    parser.add_argument("--eval_from_checkpoint", default=None, help="Evaluate the model specified")
+    # misc
     parser.add_argument(
         "--gpus",
         default="1",
-        help="The number of GPUs to train on, or the gpu to use, default='0', "
-        "so uses one GPU",
+        help="The number of GPUs to train on, or the gpu to use, default='0', " "so uses one GPU",
     )
     parser.add_argument(
         "--fast_dev_run",
@@ -330,55 +420,72 @@ if __name__ == "__main__":
         help="Use this option to make a 'fake' run which is useful for development and debugging. "
         "It uses very few batches and epochs so it won't give any meaningful result.",
     )
-
+    parser.add_argument("--resample", action="store_true", help="Resample to 16kHz")
     parser.add_argument(
-        "--eval_from_checkpoint",
-        default=None,
-        help="Evaluate the model specified"
+        "--temperature",
+        help="Temperature for the sigmoid at inference. Edit `config.yaml` for training",
     )
 
     args = parser.parse_args()
 
     with open(args.conf_file, "r") as f:
-        configs = yaml.safe_load(f)
+        config = yaml.safe_load(f)
 
-    evaluation = False 
-    test_from_checkpoint = args.test_from_checkpoint
+    if args.test_from_checkpoint is None and args.eval_from_checkpoint is None:
+        mode = TRAIN
+        ckpt_path: Optional[str] = args.resume_from_checkpoint
+    elif args.test_from_checkpoint is not None and args.eval_from_checkpoint is None:
+        mode = TEST
+        ckpt_path: str = args.test_from_checkpoint
+    elif args.test_from_checkpoint is None and args.eval_from_checkpoint is not None:
+        mode = EVALUATION
+        ckpt_path: str = args.eval_from_checkpoint
+    else:
+        raise Exception("have to use either test_from_checkpoint or eval_from_checkpoint")
 
-    if args.eval_from_checkpoint is not None:
-        test_from_checkpoint = args.eval_from_checkpoint
-        evaluation = True
-    
-    test_model_state_dict = None
-    if test_from_checkpoint is not None:
-        checkpoint = torch.load(test_from_checkpoint)
-        configs_ckpt = checkpoint["hyper_parameters"]
-        configs_ckpt["data"] = configs["data"]
-        print(
-            f"loaded model: {test_from_checkpoint} \n"
-            f"at epoch: {checkpoint['epoch']}"
-        )
-        test_model_state_dict = checkpoint["state_dict"]
+    if args.exp_name is None and ckpt_path is None:
+        exp_name: str = get_default_exp_name()
+    elif args.exp_name is None and ckpt_path is not None:
+        exp_name: str = get_exp_name_from_ckpt_path(ckpt_path)
+    else:
+        exp_name: str = args.exp_name
 
-    if evaluation:
-        configs["training"]["batch_size_val"] = 1
-        
-    seed = configs["training"]["seed"]
+    if mode == EVALUATION:
+        config["training"]["batch_size_val"] = 1
+
+    seed = config["training"]["seed"]
     if seed:
-        torch.random.manual_seed(seed)
-        np.random.seed(seed)
-        random.seed(seed)
-        pl.seed_everything(seed)
+        set_seed(seed)
 
-    test_only = test_from_checkpoint is not None
-    resample_data_generate_durations(configs["data"], test_only, evaluation)
+    if args.resample:
+        resample_data_generate_durations(config["data"], mode)
+
+    if args.train_validation:
+        config["data"]["validation_folder"] = "../../data/dcase/dataset/audio/validation/validation_16k/"
+        config["data"]["validation_folder_44"] = "../../data/dcase/dataset/audio/validation/validation/"
+        config["data"]["validation_tsv"] = "../../data/dcase/dataset/metadata/validation/validation.tsv"
+        config["data"]["test_folder"] = "../../data/DESED_public_eval/audio/eval/public_16k/"
+        config["data"]["test_folder_44k"] = "../../data/DESED_public_eval/audio/eval/public/"
+        config["data"]["test_tsv"] = "../../data/DESED_public_eval/metadata/eval/public.tsv"
+        config["data"]["test_dur"] = "../../data/DESED_public_eval/metadata/eval/public_durations.tsv"
+        config["training"]["checkpoint_params"] = {
+            "every_n_epochs": config["training"]["validation_interval"],
+            "save_last": True,
+            "save_top_k": -1,
+        }
+
+    if args.temperature is not None:
+        config["net"]["T"] = args.temperature
+
     single_run(
-        configs,
-        args.log_dir,
+        config,
+        f"{args.save_path}/{exp_name}",
         args.gpus,
+        mode,
+        ckpt_path,
         args.strong_real,
-        args.resume_from_checkpoint,
-        test_model_state_dict,
+        args.train_more_synth,
+        args.train_audioset2desed,
+        args.train_validation,
         args.fast_dev_run,
-        evaluation
     )

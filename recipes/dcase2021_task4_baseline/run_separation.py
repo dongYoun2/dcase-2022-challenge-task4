@@ -6,9 +6,7 @@ from local.apply_separation_model import SeparationModel, separate_folder
 import tensorflow.compat.v1 as tf
 import yaml
 
-parser = argparse.ArgumentParser(
-    "Run separation model on whole dataset + optional resampling to 16kHz"
-)
+parser = argparse.ArgumentParser("Run separation model on whole dataset + optional resampling to 16kHz")
 parser.add_argument("--conf_file", default="./confs/sep+sed.yaml")
 parser.add_argument("--test_only", default=False)
 
@@ -33,9 +31,7 @@ def resample_data_generate_durations(config_data, test_only=False):
         )
 
     for base_set in ["synth_val", "test"]:
-        generate_tsv_wav_durations(
-            config_data[base_set + "_folder_16k"], config_data[base_set + "_dur"]
-        )
+        generate_tsv_wav_durations(config_data[base_set + "_folder_16k"], config_data[base_set + "_dur"])
 
 
 def pre_separate(config_data, test_only=False):

@@ -3,7 +3,7 @@ import numpy as np
 
 
 class ExponentialWarmup(BaseScheduler):
-    """ Scheduler to apply ramp-up during training to the learning rate.
+    """Scheduler to apply ramp-up during training to the learning rate.
     Args:
         optimizer: torch.optimizer.Optimizer, the optimizer from which to rampup the value from
         max_lr: float, the maximum learning to use at the end of ramp-up.

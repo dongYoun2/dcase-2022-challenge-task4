@@ -24,9 +24,7 @@ class TorchScaler(torch.nn.Module):
         assert statistic in ["dataset", "instance", None]
         assert normtype in ["standard", "mean", "minmax", None]
         if statistic == "dataset" and normtype == "minmax":
-            raise NotImplementedError(
-                "statistic==dataset and normtype==minmax is not currently implemented."
-            )
+            raise NotImplementedError("statistic==dataset and normtype==minmax is not currently implemented.")
         self.statistic = statistic
         self.normtype = normtype
         self.dims = dims
@@ -72,14 +70,10 @@ class TorchScaler(torch.nn.Module):
             feats = transform_func(batch)
             if indx == 0:
                 mean = torch.mean(feats, self.dims, keepdim=True).mean(0).unsqueeze(0)
-                mean_squared = (
-                    torch.mean(feats ** 2, self.dims, keepdim=True).mean(0).unsqueeze(0)
-                )
+                mean_squared = torch.mean(feats**2, self.dims, keepdim=True).mean(0).unsqueeze(0)
             else:
                 mean += torch.mean(feats, self.dims, keepdim=True).mean(0).unsqueeze(0)
-                mean_squared += (
-                    torch.mean(feats ** 2, self.dims, keepdim=True).mean(0).unsqueeze(0)
-                )
+                mean_squared += torch.mean(feats**2, self.dims, keepdim=True).mean(0).unsqueeze(0)
             indx += 1
 
         mean /= indx
@@ -101,7 +95,7 @@ class TorchScaler(torch.nn.Module):
             if self.normtype == "mean":
                 return tensor - self.mean
             elif self.normtype == "standard":
-                std = torch.sqrt(self.mean_squared - self.mean ** 2)
+                std = torch.sqrt(self.mean_squared - self.mean**2)
                 return (tensor - self.mean) / (std + self.eps)
             else:
                 raise NotImplementedError

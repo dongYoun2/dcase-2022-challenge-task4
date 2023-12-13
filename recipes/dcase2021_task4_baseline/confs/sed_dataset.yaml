@@ -16,14 +16,14 @@ params:
   nontarget_set: ['train', 'val', 'eval']
   snr_set: ['train', 'val', 'eval']
   snr: [5, 10, 15]
-  target_labels: ["Alarm_bell_ringing", 
-                  "Blender", 
-                  "Cat", 
-                  "Dog", 
-                  "Dishes", 
-                  "Electric_shaver_toothbrush", 
-                  "Frying", 
-                  "Running_water", 
-                  "Speech", 
+  target_labels: ["Alarm_bell_ringing",
+                  "Blender",
+                  "Cat",
+                  "Dog",
+                  "Dishes",
+                  "Electric_shaver_toothbrush",
+                  "Frying",
+                  "Running_water",
+                  "Speech",
                   "Vacuum_cleaner"]
 

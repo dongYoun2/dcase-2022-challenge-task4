@@ -29,7 +29,7 @@ class CRNN(nn.Module):
     ):
         """
             Initialization of CRNN model
-        
+
         Args:
             n_in_channel: int, number of input channel
             n_class: int, number of classes
@@ -42,7 +42,7 @@ class CRNN(nn.Module):
             n_layer_RNN: int, number of RNN layers
             dropout_recurrent: float, recurrent layers dropout
             cnn_integration: bool, integration of cnn
-            freeze_bn: 
+            freeze_bn:
             **kwargs: keywords arguments for CNN.
         """
         super(CRNN, self).__init__()
@@ -58,9 +58,7 @@ class CRNN(nn.Module):
         if cnn_integration:
             n_in_cnn = 1
 
-        self.cnn = CNN(
-            n_in_channel=n_in_cnn, activation=activation, conv_dropout=dropout, **kwargs
-        )
+        self.cnn = CNN(n_in_channel=n_in_cnn, activation=activation, conv_dropout=dropout, **kwargs)
 
         self.train_cnn = train_cnn
         if not train_cnn:
@@ -89,18 +87,17 @@ class CRNN(nn.Module):
             self.dense_softmax = nn.Linear(n_RNN_cell * 2, nclass)
             self.softmax = nn.Softmax(dim=-1)
 
-
         if self.use_embeddings:
             if self.embedding_type == "frame":
-                self.frame_embs_encoder = nn.GRU(batch_first=True, input_size=embedding_size,
-                                                      hidden_size=512,
-                                                      bidirectional=True)
-                self.shrink_emb = torch.nn.Sequential(torch.nn.Linear(2 * frame_emb_enc_dim, nb_in),
-                                                      torch.nn.LayerNorm(nb_in))
+                self.frame_embs_encoder = nn.GRU(
+                    batch_first=True, input_size=embedding_size, hidden_size=512, bidirectional=True
+                )
+                self.shrink_emb = torch.nn.Sequential(
+                    torch.nn.Linear(2 * frame_emb_enc_dim, nb_in), torch.nn.LayerNorm(nb_in)
+                )
             else:
-                self.shrink_emb = torch.nn.Sequential(torch.nn.Linear(embedding_size, nb_in),
-                                                      torch.nn.LayerNorm(nb_in))
-            self.cat_tf = torch.nn.Linear(2*nb_in, nb_in)
+                self.shrink_emb = torch.nn.Sequential(torch.nn.Linear(embedding_size, nb_in), torch.nn.LayerNorm(nb_in))
+            self.cat_tf = torch.nn.Linear(2 * nb_in, nb_in)
 
     def forward(self, x, pad_mask=None, embeddings=None):
 
@@ -118,9 +115,7 @@ class CRNN(nn.Module):
             x = x.reshape(bs_in, chan * nc_in, frames, freq)
 
         if freq != 1:
-            warnings.warn(
-                f"Output shape is: {(bs, frames, chan * freq)}, from {freq} staying freq"
-            )
+            warnings.warn(f"Output shape is: {(bs, frames, chan * freq)}, from {freq} staying freq")
             x = x.permute(0, 2, 1, 3)
             x = x.contiguous().view(bs, frames, chan * freq)
         else:

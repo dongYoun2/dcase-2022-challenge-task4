@@ -17,5 +17,11 @@ classes_labels = OrderedDict(
         "Running_water": 7,
         "Speech": 8,
         "Vacuum_cleaner": 9,
+        # additional classes
+        # "Music": 10,
+        # "Traffic_noise": 11,
+        # "Rural_natural_noise": 12,
+        # "Bird": 13,
+        # "Silence": 14,
     }
 )

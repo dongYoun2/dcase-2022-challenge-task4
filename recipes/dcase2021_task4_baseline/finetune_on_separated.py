@@ -140,8 +140,9 @@ def single_run(
     elif config["training"]["sed_model"] == "teacher":
         sed_model.load_state_dict(sed_trainer.sed_teacher.state_dict(), strict=False)
     else:
-        raise EnvironmentError(f"Sed model should be either student or teacher model. \n"
-                               f"You gave: {config['training']['sed_model']}")
+        raise EnvironmentError(
+            f"Sed model should be either student or teacher model. \n" f"You gave: {config['training']['sed_model']}"
+        )
 
     sed_model = EnsembleModel(sed_model)
 
@@ -210,10 +211,7 @@ def single_run(
         epoch_len = min(
             [
                 len(tot_train_data[indx])
-                // (
-                    config["training"]["batch_size"][indx]
-                    * config["training"]["accumulate_batches"]
-                )
+                // (config["training"]["batch_size"][indx] * config["training"]["accumulate_batches"])
                 for indx in range(len(tot_train_data))
             ]
         )
@@ -230,7 +228,8 @@ def single_run(
             "interval": "step",
         }
         logger = TensorBoardLogger(
-            os.path.dirname(config["log_dir"]), config["log_dir"].split("/")[-1],
+            os.path.dirname(config["log_dir"]),
+            config["log_dir"].split("/")[-1],
         )
         print(f"experiment dir: {logger.log_dir}")
 
@@ -332,14 +331,11 @@ if __name__ == "__main__":
         default=None,
         help="Allow the training to be resumed, take as input a previously saved model (.ckpt).",
     )
-    parser.add_argument(
-        "--test_from_checkpoint", default=None, help="Test the model specified"
-    )
+    parser.add_argument("--test_from_checkpoint", default=None, help="Test the model specified")
     parser.add_argument(
         "--gpus",
         default="0",
-        help="The number of GPUs to train on, or the gpu to use, default='0', "
-        "so uses one GPU indexed by 0.",
+        help="The number of GPUs to train on, or the gpu to use, default='0', " "so uses one GPU indexed by 0.",
     )
     parser.add_argument(
         "--fast_dev_run",
@@ -360,10 +356,7 @@ if __name__ == "__main__":
         configs_ckpt = checkpoint["hyper_parameters"]
         configs_ckpt["data"] = configs["data"]
         configs = configs_ckpt
-        print(
-            f"loaded model: {test_from_checkpoint} \n"
-            f"at epoch: {checkpoint['epoch']}"
-        )
+        print(f"loaded model: {test_from_checkpoint} \n" f"at epoch: {checkpoint['epoch']}")
         test_model_state_dict = checkpoint["state_dict"]
 
     seed = configs["training"]["seed"]
