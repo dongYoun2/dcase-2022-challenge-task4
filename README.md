@@ -1,5 +1,13 @@
-# DESED_task
+# DCASE 2022 Challenge Task 4
 Domestic environment sound event detection task.
+- implementation of [DCASE 2022 Challenge Task 4](https://dcase.community/challenge2022/task-sound-event-detection-in-domestic-environments)'s [DATA ENGINEERING FOR NOISY STUDENT MODEL IN SOUND EVENT DETECTION](https://dcase.community/documents/challenge2022/technical_reports/DCASE2022_Suh_120_t4.pdf) Technical Report.
+- The code is approved by [Return Zero](https://www.rtzr.ai/en) to be revealed on GitHub by removing internal file paths and commit logs.
+- articles on [aitimes.kr](https://www.aitimes.kr/news/articleView.html?idxno=25537), [etoday.co.kr](https://www.etoday.co.kr/news/view/2181689)
+
+![image](imgs/aug_pipeline.png)
+
+**Results**
+![image](imgs/results.png)
 
 ---
 
