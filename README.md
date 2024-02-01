@@ -4,10 +4,10 @@ Domestic environment sound event detection task.
 - The code is approved by [Return Zero](https://www.rtzr.ai/en) to be revealed on GitHub by removing internal file paths and commit logs.
 - articles on [aitimes.kr](https://www.aitimes.kr/news/articleView.html?idxno=25537), [etoday.co.kr](https://www.etoday.co.kr/news/view/2181689)
 
-![image](imgs/aug_pipeline.png)
+![image](docs/aug_pipeline.png)
 
 **Results**
-![image](imgs/results.png)
+![image](docs/results.png)
 
 ---
 
